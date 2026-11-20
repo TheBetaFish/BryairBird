@@ -7,6 +7,7 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 - [Execution plan](EXECUTION_PLAN.md) — ordered tasks, gates, evidence requirements, and milestone acceptance criteria.
 - [Decision 0001](decisions/0001-canonical-milestone-roadmap.md) — canonical M0–M5 milestone sequence.
 - [Decision 0002](decisions/0002-github-actions-baseline.md) — GitHub Actions is the authoritative repository build/test baseline.
+- [Decision 0003](decisions/0003-reuse-pe-parser.md) — approved reuse of Raven's existing PE parser with a separate read-only inventory front end.
 - [Current status](STATUS.md) — active task, open issues, decisions, and verification state.
 - [Evidence logs](evidence/README.md) — format and location of reproducible task evidence.
 - [Decision records](decisions/README.md) — process for documenting proposed and approved architectural choices.
@@ -15,6 +16,8 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 
 - [UWP compatibility roadmap](uwp-roadmap.md) — architecture areas, Wine-UWP research boundaries, milestones, acceptance criteria, licensing, and security constraints.
 - [M0 feasibility audit](m0-feasibility-audit.md) — source-level audit of Raven's existing APPX/MSIX reader, WinRT plumbing, activation path, package identity tests, and the still-unverified Hello Neighbor package format.
+- [M0 PE inspection report](m0-inspection-report.md) — source-level inspection of Raven's existing PE parser, loader integration, tests, and extension gaps.
+- [M0 read-only PE inspector specification](m0-inspector-spec.md) — approved parser-reuse architecture, CLI contract, JSON v1 behavior, limits, diagnostics, and security boundary.
 - [M1 package-context design](m1-package-context-design.md) — proposed Raven subsystem boundaries, package graph and process identity model, activation sequence, security constraints, and synthetic-fixture acceptance criteria.
 - [M1.1 process-context inspection](m1-1-process-context-inspection.md) — verified child-process launch path, current launch-state transport, package-context integration boundary, and follow-up inspection requirements.
 - [M1.2 package-identity API inspection](m1-2-package-identity-api-inspection.md) — current hardcoded no-package API handlers, likely guest-context consumer, cross-process identity requirements, and regression-test plan.
