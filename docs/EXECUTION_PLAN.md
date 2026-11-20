@@ -117,7 +117,7 @@ Define:
 
 The detailed fixture matrix and expected results are maintained in `docs/m0-test-plan.md`. It covers synthetic PE32/PE32+, x86/x64/ARM/ARM64/unknown machines, imports, delay imports, RT_VERSION, SHA-256, malformed/truncated input, limits, deterministic output, directory mode, symlinks, and read-only/no-execution assertions.
 
-Before M0.4 implementation, resolve the test-plan contract questions for overlapping sections, zero-section images, input mutation during inspection, and platform-dependent unreadable paths. Missing RT_VERSION remains informational unless new evidence justifies a specification change. Update `docs/m0-inspector-spec.md` first if any behavior changes.
+Contract clarifications are resolved in section 12.1 of `docs/m0-inspector-spec.md` and section 13 of `docs/m0-test-plan.md`: overlapping sections are partial/ambiguous, zero-section headers are accepted when no section-backed data is required, input mutation is checked using one immutable buffer plus metadata rechecks, unreadable paths map to `PE_IO_ERROR`, and missing RT_VERSION is informational. Any later contradiction requires a specification update before code.
 
 Done when the test plan is committed and indexed, every specified capability has expected fixtures/results, open contract questions are explicit, and the documentation CI result is recorded only after completion. No inspector implementation in this task.
 
