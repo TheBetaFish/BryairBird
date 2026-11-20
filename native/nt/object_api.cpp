@@ -45,7 +45,9 @@ static uint32_t error(uint32_t status)
 void NativeObjectAPI::register_served(ApiRegistry &registry, NativeObjects &objects, NativeThreads &threads)
 {
 	registry.add("CloseHandle", 1, [&objects](ApiCall &call) {
-		const uint32_t status=objects.close(call[0]);
+		std::optional<uint32_t> beside;
+		if (call.alone && !(beside=objects.close_alone(call[0]))) throw ApiNeedsTurn{};
+		const uint32_t status=beside ? *beside : objects.close(call[0]);
 		if (status) call.fail(error(status), 0);
 		else call.ret(1);
 	});
@@ -149,6 +151,8 @@ bool NativeObjectAPI::dispatch(std::string_view name)
 		status=0xc0000005U;
 	}
 	if (!nt && status && !(wait && status==0x102)) environment.set_last_error(error(status));
+	// CreateEvent clears the last error when it makes a new event, as it sets ERROR_ALREADY_EXISTS for a name already taken.
+	if (!nt && create && !status) environment.set_last_error(0);
 	if (name=="_lclose" || name=="LZClose") { process.return_api(status && name=="_lclose" ? 0xffffffffU : 0U); return true; }
 	process.return_api(nt ? status : wait ? status==0 ? 0 : status==0x102 ? 0x102 : UINT32_MAX : status ? 0 : result);
 	return true;

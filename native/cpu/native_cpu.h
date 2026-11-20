@@ -61,6 +61,10 @@ struct NativeThreadState {
 	uint64_t served_stack = 0;
 	bool context_in_task = false;
 	bool serving_queued = false;
+	// The thread's block of the environment while it is served, and on a 32-bit program its FS selector and base.
+	uint64_t teb = 0;
+	uint32_t fs_selector = 0;
+	uint64_t fs_base = 0;
 };
 
 // Images must outlive this stopped/resumable x86-64 Linux process.
@@ -82,6 +86,9 @@ public:
 	bool read_alone(uint64_t address, void *into, size_t size) const;
 	// The same for writing: false when any of it is not writable in the guest, which then sees none of the bytes that did not go.
 	bool write_alone(uint64_t address, const void *from, size_t size);
+	// Whether a host thread that does not hold the turn may map, protect and free guest memory: the agent's service thread then makes
+	// the system calls, for any host thread, and the records of the guest's memory have their own lock.
+	bool memory_beside() const;
 	void write_memory(uint64_t address, std::span<const uint8_t> bytes);
 	void validate_write_memory(uint64_t address,size_t size) const;
 	uint64_t compare_exchange(uint64_t address, uint64_t expected, uint64_t desired, size_t size);
