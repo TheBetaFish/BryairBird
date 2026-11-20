@@ -2,10 +2,10 @@
 
 **Canonical roadmap:** M0–M5 in `docs/uwp/05-milestone-roadmap.md`  
 **Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures  
-**Current task:** 0.3 — Inspector test plan  
+**Current task:** 0.4 — Inspector implementation (blocked on contract clarifications)  
 **Branch:** `main`  
 **Latest CI-tested source commit:** `9792be1804e520f0885cf17b248ca56f2bbe187b`  
-**Latest documentation commit:** `76eefe572e4cadd9c47dabf81a13f78a9149d619`  
+**Latest documentation commit:** `a799eacace5e0bd3acfb96bf66bad77817153c4e`  
 **Implementation status:** No inspector code changes.
 
 ## Decisions in force
@@ -19,6 +19,7 @@
 - **M0.0 — PASS:** GitHub Actions baseline passed on run [44761707010, attempt 2](https://github.com/TheBetaFish/BryairBird/actions/runs/44761707010). Build, all six CTest shards, parser/model checks, provisioning, compliance, and final Report succeeded. Evidence: `docs/evidence/m0.md`.
 - **M0.1 — inspection complete:** `docs/m0-inspection-report.md` documents parser/loader paths and symbols, test infrastructure, tool conventions, reuse assessment, and concrete gaps. No code changes were made.
 - **M0.2 — specification complete:** `docs/m0-inspector-spec.md` defines the read-only architecture, CLI, JSON schema v1 contract, PE coverage, version-resource behavior, limits, deterministic output, diagnostics, and failure handling.
+- **M0.3 — test plan complete:** `docs/m0-test-plan.md` defines generated fixture cases, expected outcomes, malformed-input/mutation coverage, CLI/schema/determinism checks, resource limits, and no-execution assertions. `docs/README.md` and `docs/EXECUTION_PLAN.md` link the plan.
 
 ## Important parser findings
 
@@ -31,12 +32,11 @@
 ## Approval gates
 
 - Decision 0003 is approved. This authorizes the parser-reuse architecture, not unreviewed scope expansion.
-- M0.3 must define generated fixtures and expected outcomes before implementation.
-- M0.4 implementation remains subject to the specification and test plan.
+- M0.3 test plan is committed. M0.4 remains blocked until the specification questions listed in section 13 of `docs/m0-test-plan.md` are resolved; update the spec before code if needed.
 
 ## Next
 
-Complete M0.3: write the synthetic-fixture test plan, expected outcomes, malformed-input/mutation coverage, deterministic-output checks, and safety assertions. Do not implement the inspector until the test plan is committed.
+Resolve the M0.4 pre-implementation contract questions: overlapping section policy, zero-section image policy, input-change consistency, and platform-dependent unreadable-path behavior. Then implement in small tested steps. Do not start code while these contract questions remain unresolved.
 
 ## Known unverified scope
 
