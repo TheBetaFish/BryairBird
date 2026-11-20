@@ -17,9 +17,9 @@ BryairBird is a Linux-native Windows application compatibility project. It is no
 
 BryairBird is based on Raven. The current Raven-derived runtime provides a native Linux host runtime for Windows processes, including process and thread management, files, registry behavior, windows and input. Its desktop and graphics path uses Wayland and Vulkan, with DXVK for Direct3D 8/9/11 and vkd3d-proton for Direct3D 12.
 
-The existing project documentation and tested-application list describe conventional desktop applications and installers. They do **not** establish UWP, WinRT, APPX/MSIX deployment, or Microsoft Store application compatibility.
+The source tree already contains partial APPX/MSIX package-reading code, shared WinRT ABI plumbing, and a registry-based WinRT activation-factory path. These are meaningful foundations, but they do **not** establish packaged-app deployment, per-process package identity, full UWP activation, CoreApplication/CoreWindow lifecycle, or Microsoft Store game compatibility.
 
-This roadmap therefore treats UWP support as new work. No UWP capability should be considered implemented merely because a related Windows API or a similarly named DLL exists.
+See [the M0 source audit](m0-feasibility-audit.md) for exact files and explicit limitations. No UWP capability should be considered complete merely because a related Windows API or similarly named DLL exists.
 
 ## 3. Why Wine-UWP is a reference, not a drop-in port
 
@@ -81,7 +81,7 @@ Avoid implementing a broad, speculative UWP API surface. Start with a small, tes
 - Identify the first activation and graphics APIs it imports or requests.
 - Compare those requirements with Raven's existing implementations and Wine-UWP's documented work.
 
-**Exit criteria:** a reviewed API/dependency matrix with unknowns clearly marked. No runtime code changes are required for this milestone.
+**Exit criteria:** a reviewed API/dependency matrix with unknowns clearly marked. The public/source audit is recorded in [m0-feasibility-audit.md](m0-feasibility-audit.md). The milestone remains partially complete until the actual Store package metadata is inspected. No runtime code changes are required for this milestone.
 
 ### M1 — Define a minimal UWP test fixture
 
