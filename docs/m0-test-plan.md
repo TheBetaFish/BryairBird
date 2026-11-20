@@ -67,9 +67,9 @@ For recognized machine/optional-header combinations that the runtime does not su
 | H-009 | Section table truncated | `partial` or `error` according to whether a valid PE identity/header was established; `PE_INVALID_SECTION_TABLE` |
 | H-010 | Raw section range extends past EOF | `partial`, `PE_INVALID_SECTION_RANGE`; preserve independent header data |
 | H-011 | Raw offset plus size overflows integer range | `partial`, `PE_INVALID_SECTION_RANGE` |
-| H-012 | Zero sections | Must not crash; report an empty section list if the header is otherwise valid |
-| H-013 | Overlapping virtual sections | Must not crash or read outside file; expected diagnostic/status requires specification clarification before implementation |
-| H-014 | Overlapping raw sections | Must not crash or read outside file; expected diagnostic/status requires specification clarification before implementation |
+| H-012 | Zero sections | `ok` with empty section list if no requested directory/resource requires section-backed bytes; otherwise partial for the unmappable structure |
+| H-013 | Overlapping virtual sections | `partial`, `PE_INVALID_SECTION_TABLE`; ambiguous RVA mappings are rejected, never resolved by section order |
+| H-014 | Overlapping raw sections | `partial`, `PE_INVALID_SECTION_TABLE`; ambiguous RVA mappings are rejected, never resolved by section order |
 | H-015 | RVA in headers, section raw data, zero-fill tail, gap, and outside image | Header/raw data map only when file-backed; zero-fill/gap/outside must not be treated as file bytes |
 
 The test harness must assert arithmetic is checked before every offset-plus-length and count-times-element-size operation.
@@ -146,7 +146,7 @@ Build the resource directory tree and RT_VERSION payload as synthetic bytes. Inc
 | FIO-007 | Path names a directory in single-file mode | `error`, `PE_IO_ERROR`; no crash |
 | FIO-008 | Output path aliases input path (including normalized aliases) | Refuse with `PE_OUTPUT_CONFLICT`; input bytes and metadata unchanged |
 | FIO-009 | Output destination cannot be created/written | CLI exit 3; no partial success claim |
-| FIO-010 | File changes while being read | Must not produce a misleading successful digest/report; detect where supported or fail safely and document platform limitations |
+| FIO-010 | File changes while being read | Open once, compare identity/size/modification metadata before and after the read, and return `PE_IO_ERROR` if detectable metadata changes; digest and parse the same immutable buffer |
 
 Do not make permission-denied tests depend on running as an unprivileged account; those tests are environment-sensitive. Use deterministic missing-path, directory-as-file, and controlled output-failure cases in CI.
 
@@ -214,17 +214,17 @@ Follow existing repository organization and test registration. Prefer adding tes
 - No new network downloads or proprietary fixture assets.
 - Test output must identify the fixture ID and expected/actual diagnostic code on failure.
 
-## 13. Specification questions to resolve before implementation
+## 13. Contract clarifications resolved
 
-The following cases are not fully specified by the current M0.2 contract and must not be silently guessed:
+The initial M0.2 specification left several edge cases open. They are resolved in section 12.1 of `docs/m0-inspector-spec.md`:
 
-1. **Overlapping sections:** specify whether overlaps are warnings, partial errors, or accepted descriptive metadata. Define whether virtual and raw overlaps are treated differently.
-2. **Zero-section images:** confirm whether a structurally valid PE with zero sections is accepted as `ok` or treated as partial/invalid.
-3. **Input changing during inspection:** choose a portable consistency policy (e.g. metadata recheck, stable open-handle snapshot where available, or documented best-effort).
-4. **Unreadable paths:** define behavior where the OS does not reliably expose permission failures (especially under elevated CI users).
-5. **Missing version resource:** the specification currently says warning only; confirm whether this is correct for ordinary DLL/EXE inputs (it is expected to be common and should not fail inspection).
+1. Overlapping raw or virtual section ranges produce `PE_INVALID_SECTION_TABLE` and status `partial`; ambiguous RVA mappings are never guessed.
+2. A structurally valid zero-section image is `ok` if no requested data requires section-backed bytes. Unmappable nonzero directories/resources make it partial.
+3. The CLI opens each input once, reads into one immutable bounded buffer, hashes that same buffer incrementally, and compares file identity/size/modification metadata before and after the read. Detectable changes produce `PE_IO_ERROR`. Same-size content changes that preserve observable metadata cannot be universally detected and remain a documented platform limitation.
+4. Unreadable paths map to `PE_IO_ERROR`; tests do not rely on permission-denied behavior under elevated CI identities.
+5. Missing RT_VERSION remains an informational warning and does not make an otherwise valid EXE/DLL partial.
 
-These are narrow contract clarifications, not permission to expand the inspector. Record any changed behavior in the specification before implementation.
+No unresolved M0.3 contract question remains. If implementation reveals a contradiction, stop and update the specification before proceeding.
 
 ## 14. M0.3 acceptance criteria
 
