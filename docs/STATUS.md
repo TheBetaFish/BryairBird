@@ -2,10 +2,10 @@
 
 **Canonical roadmap:** M0–M5 in `docs/uwp/05-milestone-roadmap.md`  
 **Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures  
-**Current task:** 0.4 — Inspector implementation (blocked on contract clarifications)  
+**Current task:** 0.4 — Inspector implementation (step 1: CLI/report skeleton)  
 **Branch:** `main`  
 **Latest CI-tested source commit:** `9792be1804e520f0885cf17b248ca56f2bbe187b`  
-**Latest documentation commit:** `a799eacace5e0bd3acfb96bf66bad77817153c4e`  
+**Latest documentation commit:** `e25855ec4f53f5f1e30e6940febcd3ed883a7f41`  
 **Implementation status:** No inspector code changes.
 
 ## Decisions in force
@@ -32,11 +32,11 @@
 ## Approval gates
 
 - Decision 0003 is approved. This authorizes the parser-reuse architecture, not unreviewed scope expansion.
-- M0.3 test plan is committed. M0.4 remains blocked until the specification questions listed in section 13 of `docs/m0-test-plan.md` are resolved; update the spec before code if needed.
+- M0.3 test plan is committed. M0.3 edge-case contracts are resolved in `docs/m0-inspector-spec.md` section 12.1 and `docs/m0-test-plan.md` section 13. M0.4 may proceed in small tested steps under those contracts.
 
 ## Next
 
-Resolve the M0.4 pre-implementation contract questions: overlapping section policy, zero-section image policy, input-change consistency, and platform-dependent unreadable-path behavior. Then implement in small tested steps. Do not start code while these contract questions remain unresolved.
+Begin M0.4 step 1: inspect current native executable/test conventions, then add only the CLI/report/error/exit-code skeleton and its tests. Do not add PE decoding in this step. Record exact CI evidence before advancing.
 
 ## Known unverified scope
 
