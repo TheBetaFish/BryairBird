@@ -8,6 +8,7 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 - [M0 feasibility audit](m0-feasibility-audit.md) — source-level audit of Raven's existing APPX/MSIX reader, WinRT plumbing, activation path, package identity tests, and the still-unverified Hello Neighbor package format.
 - [M1 package-context design](m1-package-context-design.md) — proposed Raven subsystem boundaries, package graph and process identity model, activation sequence, security constraints, and synthetic-fixture acceptance criteria.
 - [M1.1 process-context inspection](m1-1-process-context-inspection.md) — verified child-process launch path, current launch-state transport, package-context integration boundary, and follow-up inspection requirements.
+- [M1.2 package-identity API inspection](m1-2-package-identity-api-inspection.md) — current hardcoded no-package API handlers, likely guest-context consumer, cross-process identity requirements, and regression-test plan.
 - [Hello Neighbor target investigation](hello-neighbor-target.md) — target identity, package questions, evidence requirements, and compatibility checkpoints.
 - [Packaging](packaging.md) — existing Raven-derived runtime packaging and source-material requirements.
 
