@@ -2,99 +2,182 @@
 
 **Project:** BryairBird  
 **Milestone:** M1.1 — inspect Raven process creation and ownership  
-**Status:** Source inspection complete for the launch path; no implementation or runtime test claimed  
+**Status:** Source inspection complete for the native launch path and ordinary-app ownership model; no implementation or runtime test claimed  
 **Review date:** 2026-11-19
 
-## Finding
+## Executive finding
 
-Raven's native process model starts a child by launching another Raven runtime instance. The parent constructs a `ChildLaunch`, and `spawn_child` serializes launch state through command-line options, inherited file descriptors, and an environment block.
+Raven has a well-defined process boundary that can carry packaged-app context without creating a parallel process launcher:
 
-This is a credible integration boundary for future package context: the child must receive its package identity and resolved package graph before guest application code begins. However, the existing launch contract has no package-context member or package-context descriptor. Adding package identity only to a parent-side data structure would therefore be insufficient; the child startup path must receive and own the context too.
+- Guest CreateProcess-style APIs enter `start_program` in `native/nt/child_api.cpp`.
+- `start_program` resolves the requested executable through `NativePaths`, then builds a `ChildLaunch`.
+- `spawn_child` in `native/nt/child_process.cpp` starts another Raven runtime instance and transports launch state through arguments and inherited file descriptors.
+- `native/main.cpp` parses the child options, constructs a `NativeLaunch`, and then enters the guest image execution path.
+- Existing process objects already support parent/child IPC through a handle channel and a process-request channel.
 
-This inspection narrows the design. It does not yet establish the best ownership location inside `NativeProcess`, `KernelContext`, or the guest API registration layer. Those structures need a more focused follow-up inspection before coding.
+The launch contract has no package identity or package-graph field today. The current ordinary-app layer database is not a package database. The most defensible design is an explicit, validated package context attached to the guest process at startup, with process-query IPC for other-process identity queries.
 
-## Inspected source
+**Do not add package identity to `InstalledApp` or infer it from executable paths.** Those are different concepts with different lifetimes and semantics.
 
-| File | Observed behavior | Relevance |
-|---|---|---|
-| `native/nt/child_process.h` | Declares `ChildLaunch` with image, command line, directory, standard descriptors, environment, suspended-start state, gate, and inherited handles | Current parent-to-child launch contract; no package context field exists |
-| `native/nt/child_process.cpp` | `spawn_child` starts another Raven runtime with `--run-process --execution=native`; passes environment and inherited descriptors; tracks the resulting process object | Actual host process creation and launch-state transport |
-| `native/nt/child_api.cpp` | Builds a `ChildLaunch` from CreateProcess-style arguments and calls `spawn_child` | Main guest-facing child creation path inspected |
-| `native/main.cpp` | Parses child options including `--command-line`, `--directory`, `--environment-fd`, `--inherit-fd`, `--handle-channel-fd`, and suspended-process state | Child startup currently has no explicit package-context option |
-| `native/nt/process_api.cpp` | Implements process-related guest APIs and uses process objects for current/child process operations | Process API layer; not yet proven to own package identity state |
-| `native/nt/process_info_api.cpp` | Implements process information and snapshots, including process listings | Not a package deployment or identity store |
-| `testdata/native_loader/package_identity_client.c` | Verifies that ordinary prefix programs and their queried process handles return `APPMODEL_ERROR_NO_PACKAGE` | Existing desktop no-package regression fixture |
-| `native/guest/raven-shell/winrt.c` | Resolves WinRT activation classes through registry `DllPath`, loads the library, and calls `DllGetActivationFactory` | Existing activation lookup; not a package-aware launch mechanism |
+## Source files inspected
 
-## Launch-state transport today
+| File | Verified responsibility |
+|---|---|
+| `native/nt/child_api.cpp` | Resolves CreateProcess-style executable names, constructs `ChildLaunch`, registers child-process APIs |
+| `native/nt/child_process.h` | Defines `ChildLaunch` and `ProcessObject` |
+| `native/nt/child_process.cpp` | Starts child Raven runtime, transports launch state, owns child process handles and IPC channel |
+| `native/main.cpp` | Parses `--run-process` options and constructs `NativeLaunch` before guest execution |
+| `native/nt/process_info_api.cpp` | Implements process-query IPC and process information APIs |
+| `native/nt/apps.h` | Defines ordinary `InstalledApp` and `AppLayer` data models |
+| `native/nt/apps.cpp` | Tracks installed program ownership, executable identity, filesystem changes, and registry layers |
+| `native/guest/raven-shell/winrt.c` | Resolves WinRT activation classes through registry `DllPath` and `DllGetActivationFactory` |
+| `native/nt/system_api.cpp` | Currently returns `APPMODEL_ERROR_NO_PACKAGE` for package identity queries (documented in M1.2) |
 
-The inspected `ChildLaunch` structure currently carries:
+## 1. Guest-side process creation
 
-- Executable image path.
-- Guest command line and working directory.
-- Standard input/output/error descriptors.
-- Environment block.
-- Suspended-start flag and resume gate.
-- Inherited handles.
+In `native/nt/child_api.cpp`, `start_program` resolves the requested image:
 
-The `spawn_child` implementation creates the child runtime command line, passes descriptors into the child, and writes the environment block to a memory-backed file descriptor. The child startup parser reads the corresponding options.
+- If an explicit application name is supplied, it is tried first.
+- Otherwise, the command line's first word or candidate prefixes are considered.
+- Qualified paths are resolved directly.
+- Unqualified names are searched relative to the caller, current directory, Windows system folders, Windows directory, and configured search folders.
+- The selected image must exist as a regular file; non-batch executables are checked for an MZ signature.
+- Batch files are routed through the command processor.
 
-No package identity, package graph, application declaration, or package resource roots are represented in this launch structure or in the inspected startup options.
+It then fills the current `ChildLaunch` fields: image, command line, directory, stdio descriptors, environment, suspended-start state, gate, and inherited handles. Finally it calls `spawn_child(launch, error)`.
 
-## Consequences for the M1 design
+**Gap:** This is an executable-path resolver, not a package application resolver. It does not map a package application ID to a manifest application entry, resolve framework dependencies, or establish package identity.
 
-### 1. Package context must cross the process boundary
+## 2. Existing ChildLaunch contract
 
-A package context created only in the parent runtime cannot satisfy package identity queries made by the guest application in the child. The launch protocol needs a child-readable representation of the validated context.
+`native/nt/child_process.h` defines:
 
-A descriptor-backed, versioned record is one possible transport mechanism because the current launch protocol already passes descriptors and reads structured data from them. This is a design candidate, not a selected ABI or implementation decision.
+- `image`: host executable path.
+- `command_line`: Windows UTF-16 command line.
+- `directory`: Windows working directory.
+- `standard[3]`: host descriptors for stdin, stdout, stderr.
+- `environment`: UTF-16 environment block.
+- `suspended` and `gate`: suspended process startup/resume.
+- `inherited`: handles passed from the creating guest process.
 
-### 2. Context must be attached before guest code runs
+There is no package identity, package graph, application manifest entry, package root, or resource-package list.
 
-The package identity must be available before the guest executable can call package identity APIs. Attaching it after the process begins executing creates a race and can expose incorrect no-package results during initialization.
+A parent-only package pointer would be insufficient: the child runs in a separate Raven runtime process and must receive its own validated context before guest code starts.
 
-The exact startup hook must be identified by inspecting where Raven constructs its guest process and initializes its API environment.
+## 3. Host-side child process transport
 
-### 3. Preserve the existing desktop default
+`spawn_child` starts a second copy of Raven with `--run-process --execution=native`. The inspected code transports:
 
-The existing package identity fixture is a required regression test. Ordinary child processes launched without package metadata must continue to report no package identity.
+- environment through an anonymous memory-backed file descriptor;
+- inherited handles through a serialized descriptor record;
+- suspended-start state through a gate descriptor;
+- process/handle IPC through a Unix socket pair;
+- diagnostics, stdio, command line, working directory, sandbox options, elevation, and noninteractive state through arguments and descriptors.
 
-Package context should therefore be optional and explicit. Absence of the context must preserve current behavior.
+The child process object retains its handle channel. No package-context descriptor or package identity option is currently passed.
 
-### 4. Do not overload the ordinary app-layer database
+**Integration point:** A versioned, bounded package-context descriptor could fit the existing descriptor-passing architecture. The descriptor should refer to a trusted registered package record, not let the guest invent an identity by supplying a string.
 
-The existing `native/nt/apps.cpp` code tracks ordinary installed programs and per-app prefix layers. The source audit did not establish it as a package deployment database. Package deployment records and package graph state should remain conceptually distinct unless a later source inspection finds an appropriate existing abstraction.
+## 4. Child startup and NativeLaunch
 
-### 5. Do not treat WinRT class activation as application activation
+In `native/main.cpp`, `--run-process` options are parsed before the native guest image is executed. The inspected startup path reconstructs command line, directory, inherited handles, environment, and parent channel, then creates a `NativeLaunch`.
 
-The current `RoGetActivationFactory` path loads a registered class library. A package-aware application launch still needs to select the manifest-declared application entry point and initialize the process package context. Those are separate operations.
+This is a suitable place to receive and validate a package-context descriptor. The exact process-wide owner still requires inspection of the `NativeProcess` / `NativeEnvironment` construction and API context lifetime. The package context must be attached before the guest can call package identity APIs.
 
-## Updated implementation investigation order
+## 5. Existing process-query IPC
 
-Before writing code, inspect these specific boundaries:
+`native/nt/process_info_api.cpp` already provides a useful pattern for querying another process:
 
-1. **Guest process construction:** Find the type that owns the guest image, process environment, and API dispatch state. Determine its lifetime relative to the host child process.
-2. **Startup initialization:** Find the exact point between parsing child launch options and entering guest application code.
-3. **API registration:** Find where package identity APIs are currently provided and how their no-package result is generated.
-4. **Process query semantics:** Determine how APIs that query another process obtain its package identity, and how that identity is associated with the process object.
-5. **Descriptor protocol conventions:** Reuse existing serialization, validation, and descriptor ownership patterns rather than inventing an unrelated IPC format.
+- A `ProcessObject` retains a child handle channel.
+- The process-query path can use that channel, the parent channel, or a process-request channel to reach the target runtime.
+- Requests carry a typed `kind` and bounded payload fields.
+- The target runtime answers from its own `KernelContext`, rather than the caller guessing the target's state.
 
-Only after these points are understood should a package-context transport structure be added.
+This pattern is relevant to `GetPackageFullName`, `GetPackageFamilyName`, and `GetApplicationUserModelId`: a query of another process must return the target process's package context, not the caller's. A dedicated request kind for package identity is a plausible extension, but the wire format and authorization rules have not been designed or implemented.
 
-## Acceptance tests to preserve and add
+## 6. Ordinary application ownership is not package identity
 
-- Existing ordinary process identity fixture remains unchanged and passes.
-- Ordinary child process launched without package metadata still reports no package.
-- A synthetic packaged child receives only its own supplied package identity.
-- A parent process without package context remains un-packaged when it launches a synthetic packaged child.
-- A child with malformed or unsupported context fails closed before guest application code runs.
-- Process exit and failed launch release all package-context resources.
-- Querying another process reports that process's context, not the caller's context.
+`native/nt/apps.h` and `apps.cpp` implement a separate feature:
 
-These tests define intended behavior. They have not yet been implemented or run.
+- `InstalledApp` records files, folders, registry keys, changed keys, and sometimes an executable path.
+- `identity_of(prefix, executable)` first determines which ordinary installed application owns the executable, otherwise creates a path-derived identity for an executable first encountered.
+- `AppLayer` redirects writes outside an app's owned files/registry state into an app-specific layer.
+- `record_installation` compares prefix filesystem and registry state against an installation snapshot.
 
-## Current status
+These mechanisms answer ownership and isolation questions for ordinary installed programs. They do not represent APPX/MSIX package full names, package family names, publisher identity, application IDs, dependency graphs, resource packages, or package activation metadata.
 
-M1.1 confirms the host process launch boundary and the need for explicit child-side package-context transport. It does not yet settle the guest-process ownership location or the Windows API implementation path. The next source inspection should trace guest process construction, startup, and API registration in detail.
+Do not reuse `InstalledApp.id` as a package family name or package full name. Do not infer package identity from a layer directory.
 
-No source code was changed. No build or CTest run was performed as part of this inspection.
+## 7. WinRT activation remains a separate gap
+
+`native/guest/raven-shell/winrt.c` looks up a class under the machine-level Windows Runtime activation registry, reads its `DllPath`, loads the library, and calls `DllGetActivationFactory`.
+
+This implements a registry-based class activation route. It does not by itself provide:
+
+- package application entry-point selection;
+- package graph registration;
+- package-scoped class registration;
+- framework package resolution;
+- process package identity initialization.
+
+Package-aware application activation and WinRT class activation are related but distinct operations.
+
+## Recommended design boundary (proposal only)
+
+1. **Deployment store:** Owns validated package records, install roots, parsed manifests, package type, and deployment state.
+2. **Application resolver:** Resolves a package application ID to a manifest application declaration and executable. Keep this separate from ordinary executable search.
+3. **Immutable launch context:** Represents one selected package, application entry, resolved dependency graph, resource packages, and provenance.
+4. **Child transport:** Extend `ChildLaunch` with an optional package-context descriptor/reference; validate it in the child startup parser before guest entry.
+5. **Guest process ownership:** Store the immutable context with the guest process's process-wide state. The API layer reads it; it does not parse manifests or scan deployment folders per call.
+6. **Cross-process query:** Add a typed process-request operation so process identity APIs query the target runtime's own context.
+7. **Activation and paths:** Make package-aware activation and package path resolution consume the same immutable process context.
+
+This is a proposal, not a selected ABI. The next implementation design must inspect exact `NativeProcess` construction, `NativeEnvironment` lifetime, `KernelContext` construction, and startup ordering.
+
+## Security and correctness requirements
+
+- Only a trusted, validated deployment record can create package context.
+- Guest environment variables and command-line strings cannot grant package identity.
+- Package roots must be canonicalized and checked against registered install roots.
+- Context data must be versioned, bounded, and rejected if malformed, stale, mismatched, or unsupported.
+- Ordinary processes without a package context must preserve current no-package behavior.
+- A packaged child must follow an explicit Windows-compatible inheritance rule; do not assume all child processes inherit package identity.
+- A query of another process must use that process's context, never the caller's.
+- Declared package capabilities must not be translated into unrestricted Linux host permissions.
+- Do not bypass Store licensing, encryption, signature validation, or package integrity checks.
+
+## Required tests
+
+### Launch and transport
+- Ordinary child without package metadata remains unpackaged.
+- Synthetic packaged child receives only its explicitly selected package context.
+- Context survives suspended launch and resume.
+- Malformed, oversized, unsupported-version, stale, and mismatched descriptors fail before guest entry.
+- Failed launch and process exit release all context resources.
+- Existing environment, stdio, inherited-handle, elevation, sandbox, and command-line behavior remains unchanged.
+
+### Identity and process queries
+- Current-process package full name, family name, path, package ID, and application user model ID are correct.
+- A process querying itself gets its own identity.
+- A packaged process querying an ordinary process gets the ordinary process's no-package result.
+- An ordinary process querying a packaged process gets the packaged process's identity.
+- Two packaged processes with different identities do not leak identity across process boundaries.
+- Invalid handles and exited processes follow documented Windows-compatible error behavior.
+
+### Regression
+- Existing `testdata/native_loader/package_identity_client.c` remains the desktop no-package regression fixture.
+- Existing ordinary app-layer ownership and discard-layer behavior remain unchanged.
+- Existing WinRT registry activation tests continue to pass.
+
+None of these new package-context tests have been implemented or run.
+
+## Next inspection task
+
+Before changing `ChildLaunch`, trace the construction and lifetime of `NativeProcess`, `NativeEnvironment`, and `KernelContext` in the native execution path. Identify the authoritative process-owned slot for immutable package context and confirm when it becomes available relative to API registration and guest entry. Then design the typed process-request operation for cross-process identity queries.
+
+## Verification record
+
+- Source inspection performed against the current `main` branch on 2026-11-19.
+- No source code changed.
+- No compilation or CTest run performed.
+- No Hello Neighbor package was available for inspection.
