@@ -2,6 +2,13 @@
 
 BryairBird is a Raven-based Linux Windows-application compatibility project. These documents describe the current research direction and planned work; they do not imply that UWP or Microsoft Store applications are already supported.
 
+## Execution control
+
+- [Execution plan](EXECUTION_PLAN.md) — ordered tasks, gates, evidence requirements, and milestone acceptance criteria.
+- [Current status](STATUS.md) — active task, open issues, decisions, and verification state.
+- [Evidence logs](evidence/README.md) — format and location of reproducible task evidence.
+- [Decision records](decisions/README.md) — process for documenting proposed and approved architectural choices.
+
 ## Project planning
 
 - [UWP compatibility roadmap](uwp-roadmap.md) — architecture areas, Wine-UWP research boundaries, milestones, acceptance criteria, licensing, and security constraints.

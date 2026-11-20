@@ -1,4 +1,3 @@
-
 /govm
 *.plan
 epoll_dump
@@ -32,3 +31,14 @@ testdata/npp/backup/
 *.inCaseOfCorruption.bak
 /1.7
 native/waits/target*/
+
+# Local Windows images, packages, and harvested components (never commit).
+/local/
+*.wim
+*.iso
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.eappx
+*.emsix
