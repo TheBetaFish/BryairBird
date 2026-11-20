@@ -12,7 +12,7 @@ import time
 import downloads
 
 
-FONT_PACKAGE = "http://archive.ubuntu.com/ubuntu/pool/main/f/fonts-liberation/fonts-liberation_2.1.5-3build1_all.deb"
+FONT_PACKAGE = "https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-liberation/fonts-liberation_2.1.5-3build1_all.deb"
 FONT_PACKAGE_SHA256 = "47f156bc945cfc69cf2f2a0c19b8c82b67a685738d3846673462de6a73266e1b"
 FONTS = {
     "LiberationSans-Regular.ttf": "075e71be4c58beda172ecb574a799308f04c3d054c6a5b7434954d3b0f1b28d8",
