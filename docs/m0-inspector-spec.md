@@ -238,6 +238,16 @@ Codes are stable within schema v1. New codes may be added without changing exist
 - I/O failure before the file can be fully read yields an error report when enough input metadata is available; process exit code is 3 if completion is prevented.
 - Do not stop parsing independent directories merely because one directory is malformed, unless shared bounds state makes further reads unsafe.
 
+## 12.1 Pre-implementation contract clarifications
+
+The M0.3 test plan identified edge cases not fully decided in the initial draft. The following policies are normative for schema v1:
+
+1. **Overlapping sections:** if raw-file or virtual-address ranges overlap, emit `PE_INVALID_SECTION_TABLE`, retain independently readable metadata, and mark the report `partial`. Do not choose one section arbitrarily for RVA mapping. Any RVA whose mapping is ambiguous is treated as unmapped.
+2. **Zero-section images:** a structurally valid PE header with zero sections is reportable as `ok` when no requested directory/resource decoding requires section-backed bytes. Report an empty section list. A nonzero directory that cannot be mapped remains a partial-report condition.
+3. **Input mutation during inspection:** open the input once for read-only access, capture file identity/size/modification metadata before reading, read the bounded contents into the immutable parser buffer, and recheck metadata after reading. If detectable metadata changes, emit `PE_IO_ERROR` and do not report a successful inspection. Compute SHA-256 incrementally over that same immutable buffer so the digest and parser input are identical. This is best-effort detection; platforms/filesystems that permit content changes without observable metadata changes cannot be guaranteed to provide a snapshot.
+4. **Unreadable paths:** map permission and other open/read failures to `PE_IO_ERROR`. Do not depend on a permission-specific test succeeding under elevated CI identities. If the file cannot be read completely, process exit is 3.
+5. **Missing RT_VERSION:** retain `PE_VERSION_RESOURCE_MISSING` as informational warning only. Absence does not make an otherwise valid ordinary EXE/DLL partial.
+
 ## 12. Acceptance criteria for M0.2
 
 M0.2 is complete when:
