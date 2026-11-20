@@ -5,6 +5,7 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 ## Project planning
 
 - [UWP compatibility roadmap](uwp-roadmap.md) — architecture areas, Wine-UWP research boundaries, milestones, acceptance criteria, licensing, and security constraints.
+- [M0 feasibility audit](m0-feasibility-audit.md) — source-level audit of Raven's existing APPX/MSIX reader, WinRT plumbing, activation path, package identity tests, and the still-unverified Hello Neighbor package format.
 - [Hello Neighbor target investigation](hello-neighbor-target.md) — target identity, package questions, evidence requirements, and compatibility checkpoints.
 - [Packaging](packaging.md) — existing Raven-derived runtime packaging and source-material requirements.
 
