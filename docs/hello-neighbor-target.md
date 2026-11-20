@@ -18,6 +18,8 @@ This document concerns the Store edition only. Results from the Steam edition mu
 
 The product ID identifies the Store listing; it does not identify the downloaded package format or guarantee current availability in every region.
 
+The official [Xbox Store listing](https://www.xbox.com/en-us/games/store/hello-neighbor/9nddh3r9df40) currently lists Xbox Play Anywhere and PC/handheld play, and identifies tinyBuild as publisher, Dynamic Pixels as developer, and December 8, 2017 as the release date. These facts confirm the PC-capable listing but do not establish the Windows package format.
+
 ## Questions that must be answered from the actual package
 
 | Question | Evidence required |
@@ -64,6 +66,6 @@ A checkpoint is only complete when its steps are reproducible and logs are retai
 
 ## Current status
 
-No Store package has been inspected as part of this document. The exact package format, manifest, entry point, architecture, dependencies, activation model, and runtime requirements remain **unverified**.
+No Store package has been inspected as part of this document. The exact package format, manifest, entry point, architecture, dependencies, activation model, and runtime requirements remain **unverified**. Microsoft documents APPX/MSIX app packages separately from the GDK's MSIXVC PC-game packaging workflow; the Store listing alone cannot tell us which applies to this product.
 
-The next useful step is M0 in [the UWP compatibility roadmap](uwp-roadmap.md): inspect the actual package metadata and produce a concrete API/dependency matrix before changing runtime code.
+The public and Raven-source portions of M0 are recorded in [the M0 feasibility audit](m0-feasibility-audit.md). The remaining blocker is inspection of the actual package metadata. Do not infer the package type from Play Anywhere, the Store listing, or the Steam build.
