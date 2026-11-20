@@ -5,6 +5,8 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 ## Execution control
 
 - [Execution plan](EXECUTION_PLAN.md) — ordered tasks, gates, evidence requirements, and milestone acceptance criteria.
+- [Decision 0001](decisions/0001-canonical-milestone-roadmap.md) — canonical M0–M5 milestone sequence.
+- [Decision 0002](decisions/0002-github-actions-baseline.md) — GitHub Actions is the authoritative repository build/test baseline.
 - [Current status](STATUS.md) — active task, open issues, decisions, and verification state.
 - [Evidence logs](evidence/README.md) — format and location of reproducible task evidence.
 - [Decision records](decisions/README.md) — process for documenting proposed and approved architectural choices.

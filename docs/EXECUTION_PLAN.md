@@ -9,7 +9,7 @@ Companion to the Development and Documentation Rules. The Rules say how to behav
 - **GATE** means stop, summarize, and wait for the user's explicit approval.
 - **PROVISIONAL** means a hypothesis from general Windows knowledge. Confirm it with the M0 tool and real packages before building on it.
 - This plan was written from a project brief and then checked against the current repository. It is not a substitute for source inspection. Cite actual paths for claims about Raven.
-- If this plan conflicts with the Development and Documentation Rules or `docs/uwp/*`, stop and ask. Do not choose a winner silently.
+- The canonical milestone sequence is `docs/uwp/05-milestone-roadmap.md` and is reconciled with `docs/uwp-roadmap.md` by Decision 0001. `docs/EXECUTION_PLAN.md` controls task order and gates. If a genuine technical conflict remains, record it and stop; do not silently deviate.
 - The current repository has an enforced commit-message format in `CONTRIBUTING.md` and `.github/scripts/check_commits.py`: `type: summary`. The proposed `type(task): summary` format in the original plan would fail that check. Until an approved decision changes repository policy, use `type: [task-id] summary`.
 - Do not assume a particular user machine. Record the actual environment for each verification session.
 
@@ -67,16 +67,16 @@ If a check cannot be run in the available environment, finish the documentation 
 
 The task remains **implemented, unverified** until results are returned.
 
-## M0: Windows Component Inspector
+## M0: Evidence, PE inspection tooling, and reproducible fixtures
 
 ### 0.0 Baseline and documentation setup
 
 - Check that every document listed in the Development and Documentation Rules exists. List missing documents and contradictions, including differences between `docs/uwp-roadmap.md` and `docs/uwp/05-milestone-roadmap.md`.
 - Create `docs/STATUS.md`, `docs/evidence/`, and `docs/decisions/` if missing. Add this plan to the `docs/README.md` index.
 - Add `.gitignore` entries, following repository conventions, for local-only material: harvested components, `*.wim`, `*.iso`, `*.appx`, `*.appxbundle`, `*.msix`, `*.msixbundle`, `*.eappx`, `*.emsix`, and a local `local/` directory.
-- Run the existing build and tests untouched and record the baseline. Record pre-existing failures without fixing them.
+- Use the existing `.github/workflows/ci.yml` as the baseline runner. It already triggers on pushes to `main` and includes the full configured CMake build, Rust parser tests, sanitizer/fuzz checks, and six CTest shards. Record the exact workflow run, commit SHA, job conclusions, and failed/skipped steps in `docs/evidence/m0.md`. Do not ask the user to run the baseline locally. Do not add a duplicate workflow.
 - Commit the documentation and ignore setup using the repository's enforced commit format.
-- Done when STATUS exists, baseline evidence is recorded, and contradictions are listed under Open issues.
+- Done when STATUS exists, the canonical milestone schedule is linked, and a GitHub Actions baseline result is recorded. If no workflow run is created or visible, record that as blocked; do not claim a pass or substitute a local run.
 
 ### 0.1 Inspection report (no code changes)
 
@@ -170,7 +170,7 @@ M0 is complete only when each item has an evidence entry:
 
 **GATE:** report AC-1 through AC-10 with evidence and wait for the user's sign-off. M1 does not begin before it.
 
-## M1: Prefix and component harvesting
+## M1: Prefix setup, component harvesting, and package registration
 
 All items are PROVISIONAL. `docs/uwp/02-prefix-and-harvest.md` governs; list any conflict.
 
@@ -184,7 +184,7 @@ All items are PROVISIONAL. `docs/uwp/02-prefix-and-harvest.md` governs; list any
 - 1.7 Integration tests create a prefix and harvest from a synthetic component directory built with M0 fixtures. Manual real-image validation is run by the user.
 - 1.8 Close out with an acceptance checklist and GATE.
 
-## M2: App model and activation
+## M2: Package identity, WinRT activation, and headless packaged lifecycle
 
 `docs/uwp/03-appmodel-activation.md` and the M1 process/package-identity inspection documents govern.
 
@@ -199,7 +199,7 @@ All items are PROVISIONAL. `docs/uwp/02-prefix-and-harvest.md` governs; list any
 - 2.8 Add manifest, identity, resolution, synthetic-package, and negative tests.
 - 2.9 Close out and GATE.
 
-## M3: Validation target
+## M3: Calculator / XAML rendering validation
 
 - 3.0 **Scope GATE:** inspect the actual Calculator package and dependency surface. Verify whether it is a XAML application. Record a decision on Calculator, a smaller window-only test app, or both. The user decides.
 - 3.1 The user supplies a package from a legitimate source. Record its format. If encrypted or license-bound, stop and document findings. Do not write decryption, key-extraction, or license-bypass code.
@@ -208,7 +208,7 @@ All items are PROVISIONAL. `docs/uwp/02-prefix-and-harvest.md` governs; list any
 - 3.4 Add scripted launch harness with log capture, timeouts, and exit-code checks.
 - 3.5 Close out and GATE.
 
-## M4: Hello Neighbor
+## M4: Hello Neighbor Store package and game compatibility
 
 - 4.0 Obtain the package legitimately. Record actual format (loose files, APPX/MSIX, bundle, encrypted, or another format). Run M0 inspector on every PE. Write `docs/hello-neighbor-inventory.md` covering binaries, framework dependencies, Win32/WinRT imports, graphics, input, audio, networking, Xbox services, and licensing/anti-tamper indicators.
 - 4.1 Map each requirement to Raven status (done, partial, missing) with evidence.
@@ -216,7 +216,7 @@ All items are PROVISIONAL. `docs/uwp/02-prefix-and-harvest.md` governs; list any
 - 4.3 Fix loop: capture logs, identify the first failure, make the smallest evidence-backed change, add a test where possible, and repeat.
 - 4.4 Document supported behavior, known issues, and exact reproduction steps; GATE.
 
-## M5: Hardening
+## M5: Hardening, security review, and compatibility expansion
 
 - Fuzz PE, manifest XML, and package ZIP/OPC parsers; retain harnesses.
 - Review path traversal, archive bombs, package permissions, and no-execution guarantees.

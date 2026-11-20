@@ -1,13 +1,16 @@
-# 5. Phased milestone roadmap
+# 5. Canonical phased milestone roadmap
 
-**Status:** Proposed roadmap. None of these milestones are completed merely by writing this document.
+**Status:** Canonical project milestone sequence, approved 2026-11-20. None of these milestones are completed merely by writing this document.
+
+This schedule is authoritative for milestone names and scope. `docs/uwp-roadmap.md` is the high-level architecture/target overview; `docs/EXECUTION_PLAN.md` defines task order, CI verification, and approval gates. Historical M0 references in `docs/m0-feasibility-audit.md` describe preliminary research, not a competing active milestone.
 
 ## Milestone 0 — Evidence and reproducible fixtures
 
 Purpose: close uncertainty before implementation.
 
 Tasks:
-- Record the exact Raven base commit/build configuration.
+- Record the exact Raven base commit/build configuration and baseline GitHub Actions run.
+- Inspect the existing Rust PE parser and its C/C++ wrapper before deciding whether to extend or wrap it.
 - Build a component-import inventory tool.
 - Create synthetic APPX/MSIX fixtures for identity, dependencies, app declarations, and protocol activation.
 - Test malformed manifests, package path traversal, and dependency cycles.
@@ -15,6 +18,7 @@ Tasks:
 - Identify the exact Calculator package/framework version and Hello Neighbor package format before target-specific assumptions.
 
 Exit criteria:
+- The existing Raven CI workflow completes its build, test, and parser checks for the baseline commit; record the exact run and job results.
 - Fixtures are reproducible.
 - Schemas are versioned and reviewed.
 - First harvested DLL dependency report is generated locally without committing binaries.
@@ -176,3 +180,9 @@ Exit criteria:
 ## Reference
 
 [designgears/wine-uwp](https://github.com/designgears/wine-uwp) documents a project-specific sequence of local Windows component harvesting, app-model hosting, DComp/swap-chain work, and selected shims. Raven must establish its own test results.
+
+## CI verification policy
+
+Use the repository's existing [CI workflow](../.github/workflows/ci.yml) as the authoritative automated baseline. It already runs on pushes to `main`, pull requests, and manual `workflow_dispatch`. It includes commit/file/license/script checks, Rust PE-reader tests, sanitizer-backed mutation/fuzz checks, a CMake build, and six CTest shards. Do not create a duplicate baseline workflow unless a documented gap is demonstrated.
+
+A successful CI run validates the repository's configured build/test environment. It does not validate the user's local GPU, graphics driver, Wayland session, harvested Windows components, or Hello Neighbor runtime behavior; those require separate evidence at the relevant milestones.

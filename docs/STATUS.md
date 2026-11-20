@@ -1,36 +1,32 @@
 # BryairBird project status
 
-**Current milestone:** M0 — Windows Component Inspector  
-**Current task:** 0.0 — Baseline and documentation setup (in progress)  
-**Repository branch:** `main`  
-**Inspected HEAD:** `b82da7887cf7b68af68194f24a2d9d25d77bf7ab`  
-**Last completed planning work:** UWP architecture blueprint and index; see commit `7e3cb45b3b99769efc3ff22015cb74a7a18d64da`.  
+**Canonical roadmap:** M0–M5 in `docs/uwp/05-milestone-roadmap.md`  
+**Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures  
+**Current task:** 0.0 — Baseline and documentation setup; GitHub Actions baseline pending  
+**Branch:** `main`  
+**Last documentation commit:** `f4470096c532e720c5c55aafac5f8712101f5e7b`  
 **Implementation status:** No inspector implementation started.
 
-## Current findings
+## Decisions now in force
 
-- Existing UWP architecture documents are present under `docs/uwp/`.
-- `docs/STATUS.md` and `docs/EXECUTION_PLAN.md` were absent at the inspected HEAD.
-- Raven already has a Rust PE parser at `native/peparse/`, exposed through `native/peparse/peparse.h` and wrapped by `native/pe/pe.cpp`.
-- The parser reads headers, sections, imports, delay imports, exports, resources, and the CLR header; its source includes bounds checks and a mutation test.
-- The existing parser does not yet establish all proposed inspector requirements. In particular, ARM/ARM64 support and version-resource decoding need explicit inspection and tests.
-- The repository's commit policy is `type: summary`, enforced by `.github/scripts/check_commits.py`. The execution-plan example `type(task): summary` conflicts with that policy.
+- Decision 0001: the M0–M5 schedule in `docs/uwp/05-milestone-roadmap.md` is canonical. The older M0–M6 schedule is retired.
+- Decision 0002: use the existing `.github/workflows/ci.yml` as the automated baseline. Do not ask the user to run baseline CMake/Cargo/CTest commands locally.
 
-## Open issues and GATEs
+## Verified repository facts
 
-1. **M0 definition conflict:** `docs/m0-feasibility-audit.md` and `docs/uwp-roadmap.md` use M0 for target/package feasibility; `docs/uwp/05-milestone-roadmap.md` uses M0 for broad evidence/fixtures; the execution plan uses M0 for the PE inspector. Decide whether these are separate tracks or whether milestone labels must be reconciled.
-2. **Milestone numbering conflict:** `docs/uwp-roadmap.md` has M1 as a test fixture, M2 as package identity/activation, M3 as lifecycle, M4 as graphics, M5 as target evaluation, and M6 as distribution. `docs/uwp/05-milestone-roadmap.md` and the execution plan use M1 for prefix/harvesting and M2 for app model/activation.
-3. **Inspector scope:** the execution plan proposes a new reporting tool, while Raven already has a Rust PE parser and PE-loader wrapper. M0.1 must decide whether to wrap/extend the existing parser or justify a standalone parser. No parser decision is approved.
-4. **Baseline not run:** the available GitHub inspection tools cannot execute CMake, Cargo, or CTest. The current HEAD status endpoint returned no checks, and the recent workflow-runs query returned zero runs. Local environment and working-tree status remain unknown.
-5. **Hardware assumption:** do not use the desktop hardware listed in the original handoff as a current fact. Verify the user's actual machine before graphics testing.
+- Raven has a Rust PE parser under `native/peparse/`, exposed through `native/peparse/peparse.h` and wrapped by `native/pe/pe.cpp`.
+- The CI workflow runs the Rust PE parser tests, sanitizer-backed mutation/fuzz checks, a CMake build, and six CTest shards, in addition to repository checks.
+- The workflow is configured for pushes to `main`, pull requests, and `workflow_dispatch`.
+- The repository requires commit subjects in `type: summary` format, enforced by `.github/scripts/check_commits.py`.
 
-## Open decisions
+## Open items
 
-- Decision 0001: PE inspector parser strategy — pending M0.1 source report.
-- M0/M1/M2 milestone naming and scope reconciliation — user approval required before M0.1 proceeds.
+1. **CI baseline:** GitHub Actions must produce a visible run for the current documentation commit. Record the run URL, commit SHA, and every job conclusion in `docs/evidence/m0.md`. No run/pass is claimed yet.
+2. **Inspector architecture:** M0.1 must inspect the existing parser API and test harness in detail before deciding whether to extend, wrap, or replace it.
+3. **Target package:** the actual Hello Neighbor Store package format and activation model remain unverified. This is a prerequisite for M4, not a reason to block M0.
 
 ## Last verification
 
-- Repository tree and selected source/docs inspected at HEAD above.
-- No build or test command has been run in this environment.
-- See [M0 evidence log](evidence/m0.md) for the baseline handoff.
+- Repository source, milestone documents, and CI workflow inspected.
+- No local build was run. GitHub Actions is the required baseline mechanism.
+- No CI result is recorded until a workflow run is visible and its jobs are complete.

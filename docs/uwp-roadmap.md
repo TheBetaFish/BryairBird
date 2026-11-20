@@ -71,67 +71,26 @@ Keep the UWP-specific behavior behind explicit subsystems so that the existing d
 
 Avoid implementing a broad, speculative UWP API surface. Start with a small, testable subset and expand only when a test application demonstrates the need.
 
-## 6. Milestones and acceptance criteria
+## 6. Canonical milestones
 
-### M0 — Establish the target and inventory dependencies
+The detailed milestone schedule is maintained in [`uwp/05-milestone-roadmap.md`](uwp/05-milestone-roadmap.md), with task-level execution and acceptance gates in [`EXECUTION_PLAN.md`](EXECUTION_PLAN.md). Those two documents are the canonical schedule; this file is the high-level architecture and target overview.
 
-- Obtain the target package through a legitimate account and supported method.
-- Record the package file type, manifest identity, architecture, dependencies, entry point, and declared capabilities.
-- Determine whether the package is classic APPX/MSIX or uses the GDK/MSIXVC path.
-- Identify the first activation and graphics APIs it imports or requests.
-- Compare those requirements with Raven's existing implementations and Wine-UWP's documented work.
+The project uses one consistent sequence:
 
-**Exit criteria:** a reviewed API/dependency matrix with unknowns clearly marked. The public/source audit is recorded in [m0-feasibility-audit.md](m0-feasibility-audit.md). The milestone remains partially complete until the actual Store package metadata is inspected. No runtime code changes are required for this milestone.
+| Milestone | Scope |
+|---|---|
+| **M0** | Evidence, PE inspection tooling, and reproducible fixtures |
+| **M1** | Prefix setup, component harvesting, and package registration |
+| **M2** | Package identity, WinRT activation, and headless packaged lifecycle |
+| **M3** | Calculator / XAML rendering validation |
+| **M4** | Actual Hello Neighbor Store package and game compatibility |
+| **M5** | Hardening, security review, and compatibility expansion |
 
-### M1 — Define a minimal UWP test fixture
+The previous M0–M6 sequence in this document is retired. It split activation, lifecycle, graphics, and target evaluation differently from the implementation-oriented roadmap and caused duplicate milestone meanings. Those capabilities now live under the single sequence above.
 
-- Choose or create a small, legally redistributable test application/package.
-- Make package inspection and manifest validation independently testable.
-- Add tests for architecture, identity, dependency declarations, and invalid package handling.
+The existing [M0 feasibility audit](m0-feasibility-audit.md) is retained as preliminary source and target research. Its historical “M0” label describes the audit's original context; it is not a separate active milestone and does not override the canonical schedule.
 
-**Exit criteria:** the test fixture can be inspected deterministically without launching a Windows application.
-
-### M2 — Package identity and activation prototype
-
-- Define the package identity data model.
-- Design the mapping from packaged-app activation to Raven process creation.
-- Test activation with a minimal fixture before attempting a commercial game.
-
-**Exit criteria:** the fixture reaches a known activation milestone and reports structured diagnostics. Do not call this full UWP support.
-
-### M3 — WinRT and application lifecycle
-
-- Implement the smallest required WinRT activation and ABI surface.
-- Test interface negotiation, reference lifetimes, threading, dispatch, and lifecycle transitions.
-- Keep missing APIs explicit and diagnosable.
-
-**Exit criteria:** a fixture can complete a documented lifecycle sequence without relying on undocumented behavior.
-
-### M4 — Windowing and graphics
-
-- Establish the required CoreWindow or other window model.
-- Integrate event dispatch and input with Raven's desktop backend.
-- Test swap-chain creation, resize, presentation, and shutdown.
-- Validate on both software Vulkan and a supported hardware Vulkan driver.
-
-**Exit criteria:** a test application can create and present a window reliably. A successful window alone is not evidence of game compatibility.
-
-### M5 — Target application evaluation
-
-- Install/register the target package using the supported package path.
-- Attempt activation and capture structured logs at each boundary.
-- Resolve only demonstrated blockers, adding regression tests for each fix.
-
-**Exit criteria:** document the highest reproducible milestone reached: package inspection, registration, activation, window creation, menu, or gameplay.
-
-### M6 — Distribution and security review
-
-- Review package and license obligations for every component.
-- Keep proprietary Windows binaries, Windows images, and game packages out of the public repository.
-- Review sandbox behavior and document the limits of any compatibility exceptions.
-- Produce reproducible build and test instructions.
-
-**Exit criteria:** a release can be rebuilt from documented, legally distributable source and inputs, with known limitations stated.
+No milestone is complete merely because its design document exists. Completion requires the acceptance criteria and evidence specified in the canonical roadmap and execution plan.
 
 ## 7. Hello Neighbor target: facts to verify
 
@@ -154,10 +113,10 @@ Store entitlement and package acquisition are separate from execution compatibil
 - **Incremental implementation:** each milestone must have a minimal fixture, a reproducible test, and logs that identify the failing boundary.
 - **No compatibility claims without evidence:** distinguish implemented, partially implemented, experimentally tested, and untested behavior.
 
-## 9. Initial decision
+## 9. Initial architectural decision
 
 Continue using Raven as the host-runtime foundation while investigating whether the UWP requirements can be implemented cleanly within its architecture.
 
-Do not start by importing the entire Wine-UWP patch set. First complete M0: inspect the target package requirements, map Wine-UWP's relevant subsystems, and compare both against Raven's existing process, COM, windowing, graphics, and sandbox architecture.
+Do not start by importing the entire Wine-UWP patch set. Follow the canonical M0–M5 sequence in `uwp/05-milestone-roadmap.md`. Target-package inspection remains an evidence-gathering prerequisite for M4; do not infer package format or activation behavior before inspecting the legitimately obtained package.
 
 The project should remain free to revise this decision if the dependency analysis shows that the required work would effectively recreate a large portion of Wine or undermine Raven's design.
