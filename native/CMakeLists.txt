@@ -7070,3 +7070,6 @@ foreach(target IN LISTS host_feature_targets)
     string(APPEND host_features "${target}: $<JOIN:$<TARGET_PROPERTY:${target},COMPILE_DEFINITIONS>, >\n")
 endforeach()
 file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/host-features.txt CONTENT "${host_features}")
+
+# The standalone PE inventory tool is deliberately isolated from the runtime loader.
+add_subdirectory(pe-inspect)
