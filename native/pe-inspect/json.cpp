@@ -10,27 +10,71 @@ namespace raven::inspect {
 
 namespace {
 
+void append_byte_escape(std::string &out, unsigned char byte)
+{
+	static constexpr char hex[] = "0123456789abcdef";
+	out += "\\u00";
+	out.push_back(hex[byte >> 4]);
+	out.push_back(hex[byte & 0x0f]);
+}
+
 void append_string(std::string &out, std::string_view value)
 {
 	static constexpr char hex[] = "0123456789abcdef";
 	out.push_back('"');
-	for (const unsigned char byte : value) {
-		switch (byte) {
-		case '"': out += "\\\""; break;
-		case '\\': out += "\\\\"; break;
-		case '\b': out += "\\b"; break;
-		case '\f': out += "\\f"; break;
-		case '\n': out += "\\n"; break;
-		case '\r': out += "\\r"; break;
-		case '\t': out += "\\t"; break;
-		default:
-			if (byte < 0x20) {
-				out += "\\u00";
-				out.push_back(hex[byte >> 4]);
-				out.push_back(hex[byte & 0x0f]);
-			} else {
-				out.push_back(static_cast<char>(byte));
+	for (size_t index = 0; index < value.size();) {
+		const auto byte = static_cast<unsigned char>(value[index]);
+		if (byte < 0x80) {
+			switch (byte) {
+			case '"': out += "\\\""; break;
+			case '\\': out += "\\\\"; break;
+			case '\b': out += "\\b"; break;
+			case '\f': out += "\\f"; break;
+			case '\n': out += "\\n"; break;
+			case '\r': out += "\\r"; break;
+			case '\t': out += "\\t"; break;
+			default:
+				if (byte < 0x20)
+					append_byte_escape(out, byte);
+				else
+					out.push_back(static_cast<char>(byte));
 			}
+			++index;
+			continue;
+		}
+
+		size_t length = 0;
+		uint32_t codepoint = 0;
+		if (byte >= 0xc2 && byte <= 0xdf) {
+			length = 2;
+			codepoint = byte & 0x1f;
+		} else if (byte >= 0xe0 && byte <= 0xef) {
+			length = 3;
+			codepoint = byte & 0x0f;
+		} else if (byte >= 0xf0 && byte <= 0xf4) {
+			length = 4;
+			codepoint = byte & 0x07;
+		}
+		bool valid = length != 0 && index + length <= value.size();
+		if (valid) {
+			for (size_t offset = 1; offset < length; ++offset) {
+				const auto continuation = static_cast<unsigned char>(value[index + offset]);
+				if ((continuation & 0xc0) != 0x80) {
+					valid = false;
+					break;
+				}
+				codepoint = (codepoint << 6) | (continuation & 0x3f);
+			}
+			valid = valid && !(length == 3 && codepoint >= 0xd800 && codepoint <= 0xdfff) &&
+				!(length == 3 && codepoint < 0x800) && !(length == 4 && codepoint < 0x10000) &&
+				codepoint <= 0x10ffff;
+		}
+		if (valid) {
+			out.append(value.data() + index, length);
+			index += length;
+		} else {
+			append_byte_escape(out, byte);
+			++index;
 		}
 	}
 	out.push_back('"');
