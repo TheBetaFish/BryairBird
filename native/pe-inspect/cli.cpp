@@ -46,8 +46,10 @@ ParseResult parse_arguments(int argc, const char *const argv[])
 	const std::string_view command(argv[1]);
 	if (command == "inspect")
 		result.options.command = Command::InspectFile;
-	else if (command == "inspect-dir")
+	else if (command == "inspect-dir") {
 		result.options.command = Command::InspectDirectory;
+		result.options.format = Format::JsonLines;
+	}
 	else {
 		result.error = "unknown command: " + std::string(command);
 		return result;
