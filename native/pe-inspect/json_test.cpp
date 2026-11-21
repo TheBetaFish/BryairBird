@@ -34,7 +34,7 @@ int main()
 		check(serialize_json(JsonValue(escaped)) ==
 			R"("quote\" slash\\ line\n tab\t nul\u0000")", "JSON string escaping differs");
 		check(serialize_json(JsonValue("UTF-8: café")) == "\"UTF-8: café\"", "UTF-8 bytes were not preserved");
-		const std::string invalid_utf8("x\\xffy", 3);
+		const std::string invalid_utf8("x\xffy", 3);
 		check(serialize_json(JsonValue(invalid_utf8)) == "\"x\\\\u00ffy\"", "invalid UTF-8 byte was not escaped deterministically");
 		check(serialize_json(JsonValue(JsonValue::Array{})) == "[]", "empty array differs");
 		check(serialize_json(JsonValue(JsonValue::Object{})) == "{}", "empty object differs");

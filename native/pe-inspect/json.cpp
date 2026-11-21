@@ -22,7 +22,7 @@ void append_string(std::string &out, std::string_view value)
 {
 	static constexpr char hex[] = "0123456789abcdef";
 	out.push_back('"');
-	for (size_t index = 0; index < value.size();) {
+	for (std::size_t index = 0; index < value.size();) {
 		const auto byte = static_cast<unsigned char>(value[index]);
 		if (byte < 0x80) {
 			switch (byte) {
@@ -43,7 +43,7 @@ void append_string(std::string &out, std::string_view value)
 			continue;
 		}
 
-		size_t length = 0;
+		std::size_t length = 0;
 		uint32_t codepoint = 0;
 		if (byte >= 0xc2 && byte <= 0xdf) {
 			length = 2;
@@ -57,7 +57,7 @@ void append_string(std::string &out, std::string_view value)
 		}
 		bool valid = length != 0 && index + length <= value.size();
 		if (valid) {
-			for (size_t offset = 1; offset < length; ++offset) {
+			for (std::size_t offset = 1; offset < length; ++offset) {
 				const auto continuation = static_cast<unsigned char>(value[index + offset]);
 				if ((continuation & 0xc0) != 0x80) {
 					valid = false;

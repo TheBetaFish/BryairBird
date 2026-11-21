@@ -28,7 +28,7 @@ struct JsonValue {
 };
 
 /// Serialize compact JSON with stable array/object insertion order and no insignificant whitespace.
-/// Object keys must be unique. Strings are emitted as UTF-8 with JSON-required escaping.
+/// Object keys must be unique. Valid UTF-8 is preserved; invalid bytes are escaped as \\u00XX.
 std::string serialize_json(const JsonValue &value);
 
 }
