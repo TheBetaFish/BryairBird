@@ -31,6 +31,10 @@ int main()
 		auto text = parse({"inspector", "inspect", "client.exe", "--format", "text", "--max-size", "4096"});
 		check(text && text.options.format == Format::Text && text.options.max_size == 4096, "file options were not parsed");
 
+		auto directory_default = parse({"inspector", "inspect-dir", "packages"});
+		check(directory_default && directory_default.options.format == Format::JsonLines,
+			"directory default format is not JSON Lines");
+
 		auto directory = parse({"inspector", "inspect-dir", "packages", "--recursive", "--include", "*.dll,*.exe", "--format", "jsonl"});
 		check(directory && directory.options.command == Command::InspectDirectory && directory.options.recursive &&
 			directory.options.format == Format::JsonLines && directory.options.include == "*.dll,*.exe",
