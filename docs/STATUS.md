@@ -4,9 +4,9 @@
 **Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures  
 **Current task:** 0.4 — Inspector implementation (step 1: CLI/report skeleton)  
 **Branch:** `main`  
-**Latest CI-tested source commit:** `9792be1804e520f0885cf17b248ca56f2bbe187b`  
-**Latest documentation commit:** `e25855ec4f53f5f1e30e6940febcd3ed883a7f41`  
-**Implementation status:** No inspector code changes.
+**Latest CI-tested source commit:** `9792be1804e520f0885cf17b248ca56f2bbe187b` (baseline; inspector CLI changes pending)  
+**Latest documentation commit:** `fa1dd5a87f58653ec1fbd254a86d5350d6691687`  
+**Implementation status:** Initial CLI argument parser and contract tests added; no file inspection, hashing, PE decoding, or report generation yet.
 
 ## Decisions in force
 
@@ -20,6 +20,7 @@
 - **M0.1 — inspection complete:** `docs/m0-inspection-report.md` documents parser/loader paths and symbols, test infrastructure, tool conventions, reuse assessment, and concrete gaps. No code changes were made.
 - **M0.2 — specification complete:** `docs/m0-inspector-spec.md` defines the read-only architecture, CLI, JSON schema v1 contract, PE coverage, version-resource behavior, limits, deterministic output, diagnostics, and failure handling.
 - **M0.3 — test plan complete:** `docs/m0-test-plan.md` defines generated fixture cases, expected outcomes, malformed-input/mutation coverage, CLI/schema/determinism checks, resource limits, and no-execution assertions. `docs/README.md` and `docs/EXECUTION_PLAN.md` link the plan.
+- **M0.4 — initial CLI layer added:** `native/pe-inspect/cli.*` parses the specified single-file and directory command forms, validates options/duplicates/numeric limits, and has unit contracts in `cli_test.cpp`. `docs/schemas/inspector-v1.schema.json` now defines the report shape. No inspection engine or CLI executable exists yet.
 
 ## Important parser findings
 
@@ -36,11 +37,11 @@
 
 ## Next
 
-Begin M0.4 step 1: inspect current native executable/test conventions, then add only the CLI/report/error/exit-code skeleton and its tests. Do not add PE decoding in this step. Record exact CI evidence before advancing.
+Verify CI run [44956822826](https://github.com/TheBetaFish/BryairBird/actions/runs/44956822826) for the CLI parser/CMake integration. Fix any build or test failures. After a passing run, add the report model and deterministic JSON serialization; keep file I/O, hashing, and PE decoding separate.
 
 ## Known unverified scope
 
-- Latest documentation CI run has not yet been confirmed.
+- Documentation-only CI run [44809904558](https://github.com/TheBetaFish/BryairBird/actions/runs/44809904558) passed. The later CLI/CMake run [44956822826](https://github.com/TheBetaFish/BryairBird/actions/runs/44956822826) was pending at last check.
 - No local GPU/Wayland validation.
 - No Windows component harvesting.
 - No actual Hello Neighbor Store package inspection or launch validation.
