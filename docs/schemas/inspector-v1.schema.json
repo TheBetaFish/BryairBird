@@ -1,0 +1,746 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thebetafish.github.io/BryairBird/schemas/inspector-v1.schema.json",
+  "title": "BryairBird PE Inspector Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "input",
+    "status",
+    "pe",
+    "imports",
+    "delay_imports",
+    "version_info",
+    "dependencies",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "bryairbird-pe-inspector"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "error"
+      ]
+    },
+    "pe": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/pe"
+        }
+      ]
+    },
+    "imports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/importDll"
+      }
+    },
+    "delay_imports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/delayDll"
+      }
+    },
+    "version_info": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/versionInfo"
+        }
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "$defs": {
+    "hex": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^PE_[A-Z0-9_]+$"
+        },
+        "message": {
+          "type": "string"
+        },
+        "location": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    },
+    "symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "iat_rva": {
+          "$ref": "#/$defs/hex"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "name",
+            "hint"
+          ]
+        },
+        {
+          "required": [
+            "ordinal"
+          ]
+        }
+      ]
+    },
+    "importDll": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "normalized_name",
+        "symbols"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "normalized_name": {
+          "type": "string"
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/symbol"
+          }
+        }
+      }
+    },
+    "delayDll": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "normalized_name",
+        "attributes",
+        "address_mode",
+        "symbols"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "normalized_name": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "address_mode": {
+          "enum": [
+            "rva",
+            "va"
+          ]
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/symbol"
+          }
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "normalized_name",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "normalized_name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "api_set",
+            "named_dll"
+          ]
+        }
+      }
+    },
+    "versionString": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "versionTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language_id",
+        "code_page",
+        "strings"
+      ],
+      "properties": {
+        "language_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "code_page": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "strings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/versionString"
+          }
+        }
+      }
+    },
+    "versionInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixed_file_info",
+        "string_tables",
+        "translations"
+      ],
+      "properties": {
+        "fixed_file_info": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file_version_ms",
+                "file_version_ls",
+                "product_version_ms",
+                "product_version_ls",
+                "file_flags",
+                "file_os",
+                "file_type",
+                "file_subtype"
+              ],
+              "properties": {
+                "file_version_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_version_ls": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "product_version_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "product_version_ls": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_flags": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_os": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_type": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_subtype": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ]
+        },
+        "string_tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/versionTable"
+          }
+        },
+        "translations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "language_id",
+              "code_page"
+            ],
+            "properties": {
+              "language_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "code_page": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              }
+            }
+          }
+        }
+      }
+    },
+    "coffHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "section_count",
+        "timestamp",
+        "symbol_table_pointer",
+        "symbol_count",
+        "optional_header_size",
+        "characteristics"
+      ],
+      "properties": {
+        "machine": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "section_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 96
+        },
+        "timestamp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "symbol_table_pointer": {
+          "$ref": "#/$defs/hex"
+        },
+        "symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "optional_header_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "characteristics": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      }
+    },
+    "optionalHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "magic",
+        "linker_version",
+        "size_of_code",
+        "size_of_initialized_data",
+        "size_of_uninitialized_data",
+        "entry_rva",
+        "image_base",
+        "section_alignment",
+        "file_alignment",
+        "os_version",
+        "image_version",
+        "subsystem_version",
+        "image_size",
+        "headers_size",
+        "checksum",
+        "subsystem",
+        "dll_characteristics",
+        "stack_reserve",
+        "stack_commit",
+        "heap_reserve",
+        "heap_commit",
+        "loader_flags",
+        "directory_count"
+      ],
+      "properties": {
+        "magic": {
+          "enum": [
+            267,
+            523
+          ]
+        },
+        "linker_version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "major",
+            "minor"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "minor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        },
+        "size_of_code": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "size_of_initialized_data": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "size_of_uninitialized_data": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entry_rva": {
+          "$ref": "#/$defs/hex"
+        },
+        "image_base": {
+          "$ref": "#/$defs/hex"
+        },
+        "section_alignment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_alignment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "image_version": {
+          "type": "string"
+        },
+        "subsystem_version": {
+          "type": "string"
+        },
+        "image_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headers_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checksum": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "subsystem": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "dll_characteristics": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "stack_reserve": {
+          "$ref": "#/$defs/hex"
+        },
+        "stack_commit": {
+          "$ref": "#/$defs/hex"
+        },
+        "heap_reserve": {
+          "$ref": "#/$defs/hex"
+        },
+        "heap_commit": {
+          "$ref": "#/$defs/hex"
+        },
+        "loader_flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "directory_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "directory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "name",
+        "rva",
+        "size"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "name": {
+          "type": "string"
+        },
+        "rva": {
+          "$ref": "#/$defs/hex"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "virtual_size",
+        "virtual_address",
+        "raw_size",
+        "raw_pointer",
+        "relocation_pointer",
+        "line_number_pointer",
+        "relocation_count",
+        "line_number_count",
+        "characteristics"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "virtual_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "virtual_address": {
+          "$ref": "#/$defs/hex"
+        },
+        "raw_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_pointer": {
+          "$ref": "#/$defs/hex"
+        },
+        "relocation_pointer": {
+          "$ref": "#/$defs/hex"
+        },
+        "line_number_pointer": {
+          "$ref": "#/$defs/hex"
+        },
+        "relocation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "line_number_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "characteristics": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "pe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "architecture",
+        "format",
+        "coff_header",
+        "optional_header",
+        "data_directories",
+        "sections",
+        "clr"
+      ],
+      "properties": {
+        "machine": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "architecture": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "PE32",
+            "PE32+"
+          ]
+        },
+        "coff_header": {
+          "$ref": "#/$defs/coffHeader"
+        },
+        "optional_header": {
+          "$ref": "#/$defs/optionalHeader"
+        },
+        "data_directories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/directory"
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/section"
+          }
+        },
+        "clr": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rva",
+                "size",
+                "il_only"
+              ],
+              "properties": {
+                "rva": {
+                  "$ref": "#/$defs/hex"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "il_only": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
