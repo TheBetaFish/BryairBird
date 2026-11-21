@@ -25,6 +25,7 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 - [M1.1 process-context inspection](m1-1-process-context-inspection.md) — verified child-process launch path, current launch-state transport, package-context integration boundary, and follow-up inspection requirements.
 - [M1.2 package-identity API inspection](m1-2-package-identity-api-inspection.md) — current hardcoded no-package API handlers, likely guest-context consumer, cross-process identity requirements, and regression-test plan.
 - [Hello Neighbor target investigation](hello-neighbor-target.md) — target identity, package questions, evidence requirements, and compatibility checkpoints.
+- [Windows EFS compatibility design](efs-compatibility-design.md) — EFS semantics, cryptographic/key-management requirements, host-filesystem boundary, security invariants, and staged research proposal.
 - [Packaging](packaging.md) — existing Raven-derived runtime packaging and source-material requirements.
 
 ## UWP / WinRT architecture blueprint
