@@ -5,7 +5,7 @@
 **Current task:** 0.4 — Inspector implementation (step 1: CLI/report skeleton)  
 **Branch:** `main`  
 **Latest CI-tested source commit:** `9792be1804e520f0885cf17b248ca56f2bbe187b` (baseline; inspector CLI changes pending)  
-**Latest documentation commit:** `fa1dd5a87f58653ec1fbd254a86d5350d6691687`  
+**Latest documentation commit:** `825bbbd8f3c6e8edf0b0a2a8b86dd90575bc88e2`  
 **Implementation status:** Initial CLI argument parser and contract tests added; no file inspection, hashing, PE decoding, or report generation yet.
 
 ## Decisions in force
@@ -37,11 +37,11 @@
 
 ## Next
 
-Verify CI run [44956822826](https://github.com/TheBetaFish/BryairBird/actions/runs/44956822826) for the CLI parser/CMake integration. Fix any build or test failures. After a passing run, add the report model and deterministic JSON serialization; keep file I/O, hashing, and PE decoding separate.
+Verify CI run [44956884759](https://github.com/TheBetaFish/BryairBird/actions/runs/44956884759) for the CLI parser/CMake integration and the default JSONL behavior test. Fix any build or test failures. After a passing run, add the report model and deterministic JSON serialization; keep file I/O, hashing, and PE decoding separate.
 
 ## Known unverified scope
 
-- Documentation-only CI run [44809904558](https://github.com/TheBetaFish/BryairBird/actions/runs/44809904558) passed. The later CLI/CMake run [44956822826](https://github.com/TheBetaFish/BryairBird/actions/runs/44956822826) was pending at last check.
+- Documentation-only CI run [44809904558](https://github.com/TheBetaFish/BryairBird/actions/runs/44809904558) passed. The CLI/CMake runs [44956822826](https://github.com/TheBetaFish/BryairBird/actions/runs/44956822826) and [44956840194](https://github.com/TheBetaFish/BryairBird/actions/runs/44956840194) were superseded/cancelled by subsequent pushes. The final combined run [44956884759](https://github.com/TheBetaFish/BryairBird/actions/runs/44956884759) was pending at last check.
 - No local GPU/Wayland validation.
 - No Windows component harvesting.
 - No actual Hello Neighbor Store package inspection or launch validation.
