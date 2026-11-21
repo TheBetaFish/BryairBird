@@ -104,7 +104,7 @@ For directory mode, emit one report per candidate. Exit 2 if any candidate has `
 
 ## 7. JSON schema v1
 
-Publish the machine-readable schema at `docs/schemas/inspector-v1.schema.json`. The schema file is normative for JSON validation. Top-level keys, in this exact order, are:
+Publish the machine-readable schema at `docs/schemas/inspector-v1.schema.json`. The schema file is normative for JSON validation and is indexed in `docs/README.md`. The schema must be validated as JSON before every change; schema-v1 producers and tests must validate reports against it. Top-level keys, in this exact order, are:
 
 1. `schema_version`
 2. `tool`
