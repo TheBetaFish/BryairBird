@@ -20,6 +20,7 @@ BryairBird is a Raven-based Linux Windows-application compatibility project. The
 - [M0 read-only PE inspector specification](m0-inspector-spec.md) — approved parser-reuse architecture, CLI contract, JSON v1 behavior, limits, diagnostics, and security boundary.
 - [M0 PE inspector test plan](m0-test-plan.md) — synthetic fixture matrix, malformed-input coverage, deterministic-output checks, resource limits, and read-only safety assertions.
 - [Inspector JSON Schema v1](schemas/inspector-v1.schema.json) — normative machine-readable structure for inspection reports.
+- [Inspector CLI source](../native/pe-inspect/) — isolated command-line argument parser and contract tests; inspection and report generation are not implemented yet.
 - [M1 package-context design](m1-package-context-design.md) — proposed Raven subsystem boundaries, package graph and process identity model, activation sequence, security constraints, and synthetic-fixture acceptance criteria.
 - [M1.1 process-context inspection](m1-1-process-context-inspection.md) — verified child-process launch path, current launch-state transport, package-context integration boundary, and follow-up inspection requirements.
 - [M1.2 package-identity API inspection](m1-2-package-identity-api-inspection.md) — current hardcoded no-package API handlers, likely guest-context consumer, cross-process identity requirements, and regression-test plan.
