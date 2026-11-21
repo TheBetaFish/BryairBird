@@ -29,15 +29,17 @@ int main()
 			"\"negative\":-42,\"enabled\":true,\"missing\":null,\"items\":[\"first\",\"second\"]}";
 		const auto serialized = serialize_json(JsonValue(std::move(report)));
 		check(serialized == expected, "JSON serialization or insertion order differs");
-		check(serialize_json(JsonValue(std::string("quote\" slash\\ line\n tab\t nul\0", 30))) ==
-			"\"quote\\\" slash\\\\ line\\n tab\\t nul\\u0000\"", "JSON string escaping differs");
+		std::string escaped = "quote\\\" slash\\\\ line\\n tab\\t nul";
+		escaped.push_back('\\0');
+		check(serialize_json(JsonValue(escaped)) ==
+			"\\\"quote\\\\\\\" slash\\\\\\\\ line\\\\n tab\\\\t nul\\\\u0000\\\"", "JSON string escaping differs");
 		check(serialize_json(JsonValue("UTF-8: café")) == "\"UTF-8: café\"", "UTF-8 bytes were not preserved");
 		check(serialize_json(JsonValue(JsonValue::Array{})) == "[]", "empty array differs");
 		check(serialize_json(JsonValue(JsonValue::Object{})) == "{}", "empty object differs");
 
 		bool duplicate_rejected = false;
 		try {
-			(void)serialize_json(JsonValue(JsonValue::Object{{"same", 1}, {"same", 2}}));
+			(void)serialize_json(JsonValue(JsonValue::Object{{"same", int64_t{1}}, {"same", int64_t{2}}}));
 		} catch (const std::invalid_argument &) {
 			duplicate_rejected = true;
 		}
