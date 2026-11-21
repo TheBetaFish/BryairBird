@@ -147,6 +147,16 @@ Exit criteria:
 - Security boundaries are tested.
 - Compatibility claims list apps, versions, component sets, host GPU, and driver configurations.
 
+## Cross-cutting filesystem compatibility track — Windows EFS
+
+EFS is a separate filesystem/security compatibility area, not a package format and not equivalent to BitLocker or MSIX package signing. The research baseline is `docs/efs-compatibility-design.md`.
+
+- EFS-R0 source/API audit is research-only and must inspect Raven's filesystem, file attributes/streams, guest identity, DPAPI/key storage, and crypto provider before implementation.
+- Do not mark files encrypted or return success unless file contents are actually protected and authorized/unauthorized access semantics are tested.
+- Do not assume host fscrypt, permissions, or xattrs implement Windows EFS.
+- EFS-R1 through EFS-R3 require a concrete contract, synthetic fixtures, vetted cryptographic primitives, crash-safe metadata, and a security review before code changes.
+- EFS research does not reorder M0–M5 or block the current M0 inspector task. Select actual APIs from source/import evidence.
+
 ## Cross-milestone engineering rules
 
 - Every implementation change names its source contract and regression test.
@@ -164,7 +174,7 @@ Exit criteria:
 | Area | Status |
 |---|---|
 | Raven source audit | Targeted source audit complete; full repo not exhaustively reviewed |
-| APPX/MSIX reader | Existing partial reader |
+| APPX/MSIX reader | Existing partial reader; bundle support and full deployment remain unimplemented |
 | Package deployment | Not implemented; current shim reports empty inventory |
 | Package identity | Not implemented; current APIs report no package |
 | Package-aware activation | Not implemented |
@@ -175,7 +185,9 @@ Exit criteria:
 | Windows component harvest | Not implemented |
 | StateRepository projection | Not implemented |
 | Calculator | Not tested |
-| Hello Neighbor Store build | Package format/activation model not verified |
+| Hello Neighbor Store build | Paused: current account cannot access the target; package format/activation model not verified |
+| Candy Crush Store build | Candidate alternate target; exact edition and package format not yet verified |
+| Windows EFS | Design baseline written; Raven filesystem/key-management audit not started |
 
 ## Reference
 
