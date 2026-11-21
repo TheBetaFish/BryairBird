@@ -29,10 +29,10 @@ int main()
 			"\"negative\":-42,\"enabled\":true,\"missing\":null,\"items\":[\"first\",\"second\"]}";
 		const auto serialized = serialize_json(JsonValue(std::move(report)));
 		check(serialized == expected, "JSON serialization or insertion order differs");
-		std::string escaped = "quote\\\" slash\\\\ line\\n tab\\t nul";
-		escaped.push_back('\\0');
+		std::string escaped = "quote\" slash\\ line\n tab\t nul";
+		escaped.push_back('\0');
 		check(serialize_json(JsonValue(escaped)) ==
-			"\\\"quote\\\\\\\" slash\\\\\\\\ line\\\\n tab\\\\t nul\\\\u0000\\\"", "JSON string escaping differs");
+			R"("quote\" slash\\ line\n tab\t nul\u0000")", "JSON string escaping differs");
 		check(serialize_json(JsonValue("UTF-8: café")) == "\"UTF-8: café\"", "UTF-8 bytes were not preserved");
 		check(serialize_json(JsonValue(JsonValue::Array{})) == "[]", "empty array differs");
 		check(serialize_json(JsonValue(JsonValue::Object{})) == "{}", "empty object differs");
