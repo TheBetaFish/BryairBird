@@ -1,12 +1,13 @@
 # BryairBird project status
 
-**Canonical roadmap:** M0–M5 in `docs/uwp/05-milestone-roadmap.md`  
-**Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures  
-**Current task:** 0.4 — Inspector implementation (CLI parser integrated; report model/serialization next)  
-**Branch:** `main`  
-**Latest verified CI commit:** `db8b8aec49823ef87816bcecfe870ce730c7a7ed`  
-**Latest CI run:** [44956905684 — success](https://github.com/TheBetaFish/BryairBird/actions/runs/44956905684)  
-**Implementation status:** CLI argument parser, CMake target, and contract tests are integrated. No inspection engine or executable exists yet.
+**Canonical roadmap:** M0–M5 in `docs/uwp/05-milestone-roadmap.md`
+**Current milestone:** M0 — Evidence, PE inspection tooling, and reproducible fixtures
+**Current task:** 0.4 — Inspector implementation (CLI parser and deterministic JSON serializer integrated; report model next)
+**Branch:** `main`
+**Latest verified CI commit:** `d6ab3206e8e7e14c3a63c223196029f19320c749` (upstream Raven PR head; merged as `9769e27053763b28e90508f965d6d9dc41a76d14`)
+**Latest CI run:** [45061202169 — success](https://github.com/TheBetaFish/BryairBird/actions/runs/45061202169), attempt 3
+**Upstream integration:** [PR #3 merged](https://github.com/TheBetaFish/BryairBird/pull/3); build, all six test shards, Report, and Workflows checks passed on the merged PR head.
+**Implementation status:** CLI argument parser, deterministic JSON serializer, CMake targets, and contract tests are integrated. No inspection engine or executable exists yet.
 
 ## Decisions in force
 
@@ -21,7 +22,8 @@
 - **M0.2 — specification complete:** `docs/m0-inspector-spec.md` defines read-only architecture, CLI, schema v1, limits, diagnostics, and security boundary.
 - **M0.3 — test plan complete:** `docs/m0-test-plan.md` defines fixtures, malformed-input coverage, determinism, limits, and no-execution assertions.
 - **M0.4 — CLI parser integrated:** `native/pe-inspect/cli.*`, CMake target, contract tests, and `docs/schemas/inspector-v1.schema.json` are committed.
-- **CI — PASS:** run [44956905684](https://github.com/TheBetaFish/BryairBird/actions/runs/44956905684), SHA `db8b8aec49823ef87816bcecfe870ce730c7a7ed`. Build, all six CTest shards, and Report job succeeded.
+- **M0.4 — JSON serializer integrated:** `native/pe-inspect/json.*` provides deterministic compact JSON serialization and contract tests. Schema conformance of full reports remains pending.
+- **Upstream Raven integration — PASS:** PR #3 merged at `9769e27053763b28e90508f965d6d9dc41a76d14` after CI run [45061202169](https://github.com/TheBetaFish/BryairBird/actions/runs/45061202169) passed on head `d6ab3206e8e7e14c3a63c223196029f19320c749`. Build, all six CTest shards, and Report succeeded; Workflows checks also passed.
 - **EFS design baseline:** `docs/efs-compatibility-design.md` documents Windows EFS semantics, security invariants, host filesystem questions, and staged research. No EFS implementation is claimed.
 
 ## Important parser findings
@@ -47,7 +49,7 @@
 
 ## Next
 
-Continue M0.4 by adding the report model and deterministic JSON serialization, then connect the existing Rust parser. Keep file I/O, hashing, and PE decoding separate. Verify CI after each focused implementation step.
+Implement the versioned report model and schema-aligned serialization, with focused unit tests. Then connect the existing Rust parser through `native/pe/pe.h` without adding a second decoder. Keep file I/O, hashing, resource decoding, and PE parsing in separate layers.
 
 ## Known unverified scope
 
