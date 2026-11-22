@@ -786,8 +786,15 @@ struct NativeProcess::State {
 	struct SharedView {
 		void *host = MAP_FAILED;
 		size_t size = 0;
+		// Stands for the guest's private memory (a stack): what is discarded in it reads as zero again.
+		bool private_pages = false;
 		~SharedView() { if (host != MAP_FAILED) munmap(host, size); }
 	};
+	struct SharedFile {
+		int descriptor = -1;
+		~SharedFile() { if (descriptor >= 0) close(descriptor); }
+	};
+	static std::unique_ptr<SharedView> private_view(size_t size, SharedFile &file);
 	std::map<uint64_t, std::unique_ptr<SharedView>> shared_views;
 	// Guards what records the guest's memory (the mappings and allocations, the shared views and the served blocks among them, and the
 	// API breakpoints in it): a host thread changes it beside the turn for the calls of its own thread (VirtualAlloc and VirtualFree)
@@ -858,6 +865,7 @@ struct NativeProcess::State {
 	std::function<void(std::function<bool()>)> execution_turn;
 	std::function<int(pid_t, std::chrono::steady_clock::time_point, const uint64_t *)> execution_park;
 	std::function<std::optional<uint64_t>(uint64_t, const uint64_t *)> concurrent_served;
+	std::function<std::optional<uint64_t>(uint64_t, uint64_t, const uint64_t *)> concurrent_service;
 	std::function<bool()> poll_served;
 	// Diagnostics: where the guest is found running, every sample_period.
 	std::chrono::milliseconds sample_period{0};
@@ -875,6 +883,7 @@ struct NativeProcess::State {
 	void require_memory() const;
 	bool covers(uint64_t address, size_t size, int protection) const;
 	uint8_t *shared_memory(uint64_t address, size_t &size) const;
+	uint8_t *shared_alone(uint64_t address, size_t size, int protection) const;
 	pid_t memory_reader() const;
 	uint64_t limit() const { return mode == NativeMode::x86 ? 0x100000000ULL : 0x800000000000ULL; }
 };
@@ -894,6 +903,28 @@ uint8_t *NativeProcess::State::shared_memory(uint64_t address, size_t &size) con
 	if (after != shared_views.end())
 		size = std::min(size, size_t(after->first - address));
 	return nullptr;
+}
+
+// Memory both sides map, for a host thread without the turn that holds memory_lock: all of it within one view and open to `protection`.
+uint8_t *NativeProcess::State::shared_alone(uint64_t address, size_t size, int protection) const
+{
+	size_t count = size;
+	auto *const shared = shared_memory(address, count);
+	return shared && count == size && covers(address, size, protection) ? shared : nullptr;
+}
+
+std::unique_ptr<NativeProcess::State::SharedView> NativeProcess::State::private_view(size_t size, SharedFile &file)
+{
+	file.descriptor = memfd_create("raven-private-view", MFD_CLOEXEC);
+	if (file.descriptor < 0 || ftruncate(file.descriptor, off_t(size)) != 0)
+		throw std::runtime_error("cannot create native private memory");
+	auto view = std::make_unique<SharedView>();
+	view->size = size;
+	view->private_pages = true;
+	view->host = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, file.descriptor, 0);
+	if (view->host == MAP_FAILED)
+		throw std::runtime_error("cannot map native private memory in host");
+	return view;
 }
 
 void NativeProcess::State::require_stopped() const
@@ -956,6 +987,12 @@ NativeProcess::NativeProcess(std::span<LoadedImage *const> images, const std::st
 			throw std::runtime_error("native image does not fit the guest address space");
 		descriptors.push_back(mapped_image->descriptor());
 	}
+	// The first thread's stack is as large as the program's headers reserve, as Windows makes it, from 1 MiB to 64 MiB. Both sides map
+	// it; the guest is born with its file.
+	const uint64_t stack_size = std::clamp<uint64_t>((stack_reserve + 0xffff) & ~uint64_t(0xffff), 1024 * 1024, 64 * 1024 * 1024);
+	State::SharedFile stack_file;
+	auto stack_view = State::private_view(stack_size, stack_file);
+	descriptors.push_back(stack_file.descriptor);
 	state->child = std::make_unique<NativeChild>(descriptors, bootstrap, setup_timeout);
 	state->child->owner = state->id;
 	auto &child = *state->child;
@@ -978,15 +1015,17 @@ NativeProcess::NativeProcess(std::span<LoadedImage *const> images, const std::st
 			++state->mapping_changes;
 		}
 	}
-	// The first thread's stack is as large as the program's headers reserve, as Windows makes it, from 1 MiB to 64 MiB.
-	const uint64_t stack_size = std::clamp<uint64_t>((stack_reserve + 0xffff) & ~uint64_t(0xffff), 1024 * 1024, 64 * 1024 * 1024);
 	state->initial_stack_size = stack_size;
 	const uint64_t low_flag = mode == NativeMode::x86 ? MAP_32BIT : 0;
 	const auto stack = child.syscall(SYS_mmap, 0, stack_size + 8192, PROT_NONE,
 		MAP_PRIVATE | MAP_ANONYMOUS | low_flag, uint64_t(-1));
 	if (stack + stack_size + 8192 > state->limit())
 		throw std::runtime_error("host placed the native stack outside the guest address space");
-	child.syscall(SYS_mprotect, stack + 4096, stack_size, PROT_READ | PROT_WRITE);
+	const auto guest_file = static_cast<uint64_t>(stack_file.descriptor);
+	if (child.syscall(SYS_mmap, stack + 4096, stack_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, guest_file, 0) != stack + 4096)
+		throw std::runtime_error("host placed the native stack's memory elsewhere");
+	child.syscall(SYS_close, guest_file);
+	state->shared_views.emplace(stack + 4096, std::move(stack_view));
 	state->mappings.insert_or_assign(stack + 4096, ImageMapping{stack + 4096, stack_size, 0, PROT_READ | PROT_WRITE});
 	++state->mapping_changes;
 	state->side().stack_top = stack + 4096 + stack_size;
@@ -1176,7 +1215,9 @@ std::vector<uint8_t> NativeProcess::read_memory(uint64_t address, size_t size) c
 		}
 		const iovec local{result.data() + offset, count};
 		const iovec remote{reinterpret_cast<void *>(address + offset), count};
-		const auto copied = process_vm_readv(state->child->pid(), &local, 1, &remote, 1, 0);
+		// Through the task that lives as long as the process: a host thread beside the turn reads while the turn switches the child.
+		CallCycles::instance().copied();
+		const auto copied = process_vm_readv(state->memory_reader(), &local, 1, &remote, 1, 0);
 		if (copied < 0 && errno == EINTR) continue;
 		if (copied <= 0)
 			throw std::runtime_error("cannot read native guest memory");
@@ -1200,10 +1241,17 @@ bool NativeProcess::memory_beside() const
 
 bool NativeProcess::read_alone(uint64_t address, void *into, size_t size) const
 {
+	// The records of memory are only tried: whoever holds them may be making the guest's system calls, and the kernel copies meanwhile.
+	if (std::unique_lock memory(state->memory_lock, std::try_to_lock); memory)
+		if (const auto *shared = state->shared_alone(address, size, PROT_READ)) {
+			std::memcpy(into, shared, size);
+			return true;
+		}
 	const pid_t task = state->memory_reader();
 	for (size_t offset = 0; offset < size;) {
 		const iovec local{static_cast<uint8_t *>(into) + offset, size - offset};
 		const iovec remote{reinterpret_cast<void *>(address + offset), size - offset};
+		CallCycles::instance().copied();
 		const auto copied = process_vm_readv(task, &local, 1, &remote, 1, 0);
 		if (copied < 0 && errno == EINTR)
 			continue;
@@ -1216,10 +1264,16 @@ bool NativeProcess::read_alone(uint64_t address, void *into, size_t size) const
 
 bool NativeProcess::write_alone(uint64_t address, const void *from, size_t size)
 {
+	if (std::unique_lock memory(state->memory_lock, std::try_to_lock); memory)
+		if (auto *shared = state->shared_alone(address, size, PROT_WRITE)) {
+			std::memcpy(shared, from, size);
+			return true;
+		}
 	const pid_t task = state->memory_reader();
 	for (size_t offset = 0; offset < size;) {
 		const iovec local{const_cast<uint8_t *>(static_cast<const uint8_t *>(from)) + offset, size - offset};
 		const iovec remote{reinterpret_cast<void *>(address + offset), size - offset};
+		CallCycles::instance().copied();
 		const auto copied = process_vm_writev(task, &local, 1, &remote, 1, 0);
 		if (copied < 0 && errno == EINTR)
 			continue;
@@ -1244,7 +1298,8 @@ void NativeProcess::write_memory(uint64_t address, std::span<const uint8_t> byte
 		}
 		const iovec local{const_cast<uint8_t *>(bytes.data() + offset), count};
 		const iovec remote{reinterpret_cast<void *>(address + offset), count};
-		const auto copied = process_vm_writev(state->child->pid(), &local, 1, &remote, 1, 0);
+		CallCycles::instance().copied();
+		const auto copied = process_vm_writev(state->memory_reader(), &local, 1, &remote, 1, 0);
 		if (copied < 0 && errno == EINTR) continue;
 		if (copied <= 0)
 			throw std::runtime_error("cannot write native guest memory");
@@ -1942,7 +1997,49 @@ void NativeProcess::discard_memory(uint64_t address, size_t size)
 	});
 	if (owned == state->allocations.end())
 		throw std::runtime_error("native discard range is outside a dynamic allocation");
-	memory_syscall(SYS_madvise,address,size,MADV_DONTNEED);
+	const auto view = state->shared_views.find(owned->first);
+	if (view == state->shared_views.end() || !view->second->private_pages) {
+		memory_syscall(SYS_madvise,address,size,MADV_DONTNEED);
+		return;
+	}
+	// MADV_DONTNEED leaves shared pages as they are. The host's view is always writable, as MADV_REMOVE needs, whatever the guest's is.
+	if (madvise(static_cast<uint8_t *>(view->second->host) + (address - owned->first), size, MADV_REMOVE) != 0)
+		throw std::runtime_error("cannot discard native shared memory");
+}
+
+void NativeProcess::share_memory(uint64_t address, size_t size)
+{
+	std::lock_guard memory(state->memory_lock);
+	state->trap_page.clear();
+	state->require_memory();
+	memory_range(address, size, PROT_NONE, state->limit());
+	const auto owned = std::find(state->allocations.begin(), state->allocations.end(), std::pair<uint64_t, uint64_t>(address, size));
+	if (owned == state->allocations.end() || state->shared_views.contains(address) || !has_protection(address, size, PROT_NONE))
+		throw std::runtime_error("native shared memory requires an untouched reservation");
+	State::SharedFile file;
+	auto view = State::private_view(size, file);
+	const auto scratch = map_memory(4096, PROT_READ | PROT_WRITE);
+	uint64_t guest_file = uint64_t(-1);
+	try {
+		guest_file = receive_descriptor(file.descriptor, scratch);
+		if (memory_syscall(SYS_mmap, address, size, PROT_NONE, MAP_SHARED | MAP_FIXED, guest_file, 0) != address) {
+			state->child->stop();
+			throw std::runtime_error("host returned an invalid shared memory address");
+		}
+		state->shared_views.emplace(address, std::move(view));
+		memory_syscall(SYS_close, guest_file, 0);
+		guest_file = uint64_t(-1);
+		unmap_memory(scratch);
+	} catch (...) {
+		try {
+			if (guest_file != uint64_t(-1))
+				memory_syscall(SYS_close, guest_file, 0);
+			unmap_memory(scratch);
+		} catch (...) {
+			state->child->stop();
+		}
+		throw;
+	}
 }
 
 void NativeProcess::map_image(LoadedImage &image)
@@ -2352,6 +2449,36 @@ void NativeProcess::set_concurrent_served(std::function<std::optional<uint64_t>(
 	state->concurrent_served = std::move(alone);
 }
 
+void NativeProcess::set_concurrent_service(std::function<std::optional<uint64_t>(uint64_t, uint64_t, const uint64_t *)> alone)
+{
+	state->concurrent_service = std::move(alone);
+}
+
+bool NativeProcess::serve_service_alone(pid_t task)
+{
+	uint64_t *const held = state->concurrent_service ? agent::block_of(task) : nullptr;
+	user_regs_struct registers{};
+	if (!held || agent::request(PTRACE_GETREGS, task, nullptr, &registers) == -1)
+		return false;
+	const uint64_t since = __rdtsc(), number = registers.orig_rax;
+	// Argument one is in R10, as SYSCALL takes RCX for itself.
+	const uint64_t arguments[]{registers.r10, registers.rdx, registers.r8, registers.r9, registers.rsp};
+	const auto result = state->concurrent_service(registers.rip, number, arguments);
+	if (!result)
+		return false;
+	if (auto &cycles = CallCycles::instance(); cycles.enabled()) {
+		uint64_t *const stamps = held + agent::cycle_stamps;
+		cycles.answered(stamps, number, cycles.seen(stamps, number, since), true);
+	}
+	registers.rax = *result;
+	registers.rcx = registers.r10;
+	registers.orig_rax = uint64_t(-1);
+	if (agent::request(PTRACE_SETREGS, task, nullptr, &registers) == -1 ||
+		agent::request(state->guest_resume(), task, nullptr, nullptr) == -1)
+		throw std::runtime_error("cannot resume a native guest task after a system call answered beside the turn");
+	return true;
+}
+
 bool NativeProcess::serve_alone(uint64_t *block)
 {
 	if (!block || !state->concurrent_served)
@@ -2377,7 +2504,11 @@ bool NativeProcess::serve_stopped_alone(pid_t task, int status, uint64_t *block)
 {
 	// A guest whose host thread was asleep spins in its stub until it stops at the breakpoint of a long wait, and goes back to looking at
 	// its block when let go on: a call that needs nothing of the runtime is answered there as well, without the turn.
-	if (!block || status < 0 || !WIFSTOPPED(status) || WSTOPSIG(status) != SIGTRAP)
+	if (!block || status < 0 || !WIFSTOPPED(status))
+		return false;
+	if (WSTOPSIG(status) == (SIGTRAP | 0x80))
+		return serve_service_alone(task);
+	if (WSTOPSIG(status) != SIGTRAP)
 		return false;
 	const uint64_t stub = __atomic_load_n(&block[0], __ATOMIC_ACQUIRE);
 	user_regs_struct registers{};
@@ -2427,11 +2558,14 @@ int NativeProcess::wait_task(pid_t task, std::chrono::steady_clock::time_point d
 		patience = std::min(200u, patience * 2);
 		return result;
 	};
+	const uint32_t *const stop = block ? agent::stop_word(task) : nullptr;
 	for (unsigned polls = poller.polls ? 200 - patience : 199;; ++polls) {
 		if (block && polls < 200)
 			for (unsigned looks = 0; looks < 64; ++looks) {
 				if (__atomic_load_n(&block[0], __ATOMIC_ACQUIRE))
 					return came(-4);
+				if (stop && __atomic_load_n(stop, __ATOMIC_ACQUIRE) == agent::posted)
+					break;
 				__builtin_ia32_pause();
 			}
 		int status = 0;
@@ -3126,6 +3260,8 @@ NativeResult NativeProcess::resume_task(std::chrono::milliseconds timeout)
 		} else {
 			if (state->resume_hook)
 				state->resume_hook();
+			if (uint64_t *const stamps = std::exchange(state->side().service_stamps, nullptr))
+				CallCycles::instance().answered(stamps, state->side().service_number, state->side().service_seen);
 			trace(state->steps_left ? PTRACE_SINGLESTEP : state->seccomp ? PTRACE_CONT : PTRACE_SYSEMU, child.pid());
 		}
 		state->side().stopped = false;
@@ -3343,6 +3479,13 @@ NativeResult NativeProcess::resume_task(std::chrono::milliseconds timeout)
 	}
 	if (signal == (SIGTRAP | 0x80)) {
 		state->side().awaiting_syscall = true;
+		if (auto &cycles = CallCycles::instance(); cycles.enabled())
+			if (uint64_t *const block = agent::block_of(child.pid())) {
+				auto &side = state->side();
+				side.service_stamps = block + agent::cycle_stamps;
+				side.service_number = registers.orig_rax;
+				side.service_seen = cycles.seen(side.service_stamps, side.service_number);
+			}
 		return {NativeStop::syscall, registers.orig_rax, registers.rip, signal};
 	}
 	state->side().awaiting_syscall = false;
@@ -3537,6 +3680,17 @@ bool NativeProcess::inside_served_stub() const
 uint64_t NativeProcess::serve_call(uint64_t stub, std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, bool queued)
 {
 	++state->served_calls;
+	return translated_call(std::move(words), floats, stack, queued, [&] { state->served_handler(stub); });
+}
+
+uint64_t NativeProcess::serve_beside(std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, const std::function<void()> &handler)
+{
+	return translated_call(std::move(words), floats, stack, false, handler);
+}
+
+uint64_t NativeProcess::translated_call(std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, bool queued,
+	const std::function<void()> &handler)
+{
 	auto translated_words = std::move(state->side().translated_words);
 	const auto translated_depth = state->side().translated_depth;
 	const auto translated_floats = state->side().translated_floats;
@@ -3560,7 +3714,7 @@ uint64_t NativeProcess::serve_call(uint64_t stub, std::vector<uint64_t> words, s
 	uint64_t result = 0;
 	try {
 		begin_translated_call(std::move(words), floats);
-		state->served_handler(stub);
+		handler();
 		result = end_translated_call();
 	} catch (...) {
 		state->side().translated_words.reset();
@@ -3767,8 +3921,7 @@ void NativeProcess::enter_nt_service(uint64_t instruction, uint32_t number)
 		throw std::runtime_error("native process is not at a pending syscall service");
 	auto saved=context();
 	if (saved.registers.rip!=instruction || saved.registers.orig_rax!=number || instruction<2 ||
-		read_memory(instruction-2,2)!=std::vector<uint8_t>{0x0f,0x05} || !state->covers(instruction-2,3,PROT_EXEC) ||
-		read_memory(instruction,1)!=std::vector<uint8_t>{0xc3})
+		!state->covers(instruction-2,3,PROT_EXEC) || read_memory(instruction-2,3)!=std::vector<uint8_t>{0x0f,0x05,0xc3})
 		throw std::runtime_error("native NT service boundary does not match the captured syscall");
 	// x64 NT service stubs preserve argument one in R10 before SYSCALL replaces RCX.
 	saved.registers.rcx=saved.registers.r10;

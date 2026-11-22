@@ -250,6 +250,8 @@ void register_thread_api(ApiRegistry &registry, KernelContext &context)
 				object = mutex->table_object();
 			else if (const auto semaphore = objects.object_as<SemaphoreObject>(handle))
 				object = semaphore->waits_object;
+			else if (const auto thread = objects.object_as<ThreadObject>(handle))
+				object = NativeThreads::end_object(*thread->thread);
 			if (!object)
 				return std::vector<uint32_t>{};
 			table.push_back(object);
@@ -369,6 +371,23 @@ void register_thread_api(ApiRegistry &registry, KernelContext &context)
 				return wait_io_completion;
 			if (milliseconds == 0 || (wake && std::chrono::steady_clock::now() >= *wake))
 				return wait_timeout;
+			// Where one host thread runs every guest thread, such a wait stands in the table's line instead, and the scheduler reads what
+			// the table told it (see NativeThreads::wait_in_line).
+			if (!threads.waits_outside() && !table.empty()) {
+				raven_waits_take_apcs(kernel_waits(), id);
+				if (alertable && !threads.current().apcs.empty())
+					continue;
+				if (const uint32_t result = threads.wait_in_line(table, all, alertable, wake); result != raven_wait_unlined) {
+					if (result < 64 || (result >= wait_abandoned && result < wait_abandoned + 64) || result == wait_timeout)
+						return result;
+					if (result == wait_io_completion) {
+						raven_waits_take_apcs(kernel_waits(), id);
+						if (run_apcs())
+							return wait_io_completion;
+					}
+					continue;
+				}
+			}
 			// A wait on objects of the process's table alone blocks its host thread there, outside the runtime, until whoever sets what
 			// it waits for wakes it with what it took (see native/waits). The others are looked at again when something may have ended them.
 			if (threads.waits_outside() && !table.empty()) {
@@ -381,17 +400,11 @@ void register_thread_api(ApiRegistry &registry, KernelContext &context)
 					GuestThread &self;
 					Announced(NativeThreads &threads, GuestThread &self, const std::vector<uint32_t> &table) : threads(threads), self(self)
 					{
-						self.waits_on = table;
-						threads.table_waiters.fetch_add(1, std::memory_order_release);
-						for (const uint32_t object : table)
-							threads.table_waited[object % threads.table_waited.size()].fetch_add(1, std::memory_order_acq_rel);
+						threads.announce(self, table);
 					}
 					~Announced()
 					{
-						for (const uint32_t object : self.waits_on)
-							threads.table_waited[object % threads.table_waited.size()].fetch_sub(1, std::memory_order_release);
-						threads.table_waiters.fetch_sub(1, std::memory_order_release);
-						self.waits_on.clear();
+						threads.withdraw(self);
 					}
 				} announced(threads, threads.current(), table);
 				const uint32_t result = threads.wait_outside([&](std::optional<std::chrono::steady_clock::time_point> until) {
@@ -567,6 +580,9 @@ void register_thread_api(ApiRegistry &registry, KernelContext &context)
 			auto until = wake;
 			for (size_t index = 0; index < handles.size(); ++index)
 				if (const auto due = waited.wakes_at(index); due && (!until || *due < *until)) until = due;
+			// A thread that waits here and takes no message shows frames as message retrieval does, and looks again as often.
+			if (context.present_frames)
+				if (const auto look = context.present_frames(); !until || look < *until) until = look;
 			HostWait waiting;
 			threads.block([&] {
 				if (alertable && !me->apcs.empty()) return true;

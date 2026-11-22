@@ -57,6 +57,9 @@ struct NativeThreadState {
 	bool stopped = true;
 	uint64_t served_guest = 0;
 	uint64_t *served_block = nullptr;
+	// The system call being answered as RAVEN_CYCLES counts it: the stamps in its task's block, its number and when it was seen.
+	uint64_t *service_stamps = nullptr;
+	uint64_t service_number = 0, service_seen = 0;
 	bool serving = false;
 	uint64_t served_stack = 0;
 	bool context_in_task = false;
@@ -81,8 +84,8 @@ public:
 	NativeContext context() const;
 	void set_context(const NativeContext &context);
 	std::vector<uint8_t> read_memory(uint64_t address, size_t size) const;
-	// Reads guest memory from a host thread that does not hold the turn: straight from the child, without the tables of regions the
-	// turn guards. False when any of it cannot be read.
+	// Reads guest memory from a host thread that does not hold the turn: from the view both sides map where there is one, otherwise
+	// straight from the child. It never waits for the tables of regions. False when any of it cannot be read.
 	bool read_alone(uint64_t address, void *into, size_t size) const;
 	// The same for writing: false when any of it is not writable in the guest, which then sees none of the bytes that did not go.
 	bool write_alone(uint64_t address, const void *from, size_t size);
@@ -124,6 +127,8 @@ public:
 	uint64_t map_descriptor(int descriptor, size_t size, uint64_t offset = 0);
 	bool memory_available(uint64_t address, size_t size) const;
 	void discard_memory(uint64_t address, size_t size);
+	// Backs a reservation nothing has touched with memory the host maps as well, as thread stacks are: copies there need no kernel.
+	void share_memory(uint64_t address, size_t size);
 	// Dynamic image mappings share LoadedImage storage; the loader owns initialization and lifetime.
 	void map_image(LoadedImage &image);
 	void unmap_image(uint64_t address);
@@ -217,9 +222,13 @@ public:
 	// Calls a parallel guest leaves in its block that the host thread may answer outside the runtime's turn: `alone` gets the stub and
 	// the four argument words and gives the result, or nothing when the call needs the runtime after all.
 	void set_concurrent_served(std::function<std::optional<uint64_t>(uint64_t, const uint64_t *)> alone);
+	// The same for a system call that stopped a guest in the agent's hands: `alone` gets the address after the instruction, the number,
+	// and the four argument words followed by the stack pointer. The guest goes on at that address with the result in RAX.
+	void set_concurrent_service(std::function<std::optional<uint64_t>(uint64_t, uint64_t, const uint64_t *)> alone);
 	// Answers the call in `block` that way; false when it is not one or needs the runtime.
 	bool serve_alone(uint64_t *block);
 	bool serve_stopped_alone(pid_t task, int status, uint64_t *block);
+	bool serve_service_alone(pid_t task);
 	// Writes the floating-point and extended state of a paused task, as PTRACE_GETREGSET with NT_X86_XSTATE gives it.
 	static void set_task_xstate(pid_t task, std::span<const uint8_t> xstate);
 	static void arm_host_thread();
@@ -235,11 +244,14 @@ public:
 	std::vector<uint64_t> api_arguments(size_t count) const;
 	// Replaces one stdcall argument word of the pending x86 API call, so an adapter can forward the call to another handler.
 	void set_api_argument(size_t index, uint32_t value);
-	// Runs a handler written for x64 argument conventions on behalf of a 32-bit call: api_arguments and api_float_arguments answer from the
-	// given words, and return_api keeps its value for end_translated_call instead of resuming the guest.
 	// Lets a guest that runs for `slice` without stopping be interrupted so that `yield` can give the processor to another thread; `wanted` says
 	// whether there is another thread to give it to.
 	void set_time_slicing(std::chrono::milliseconds slice, std::function<bool()> wanted, std::function<void()> yield);
+	// Runs `handler` as a call of the calling host thread's own guest thread, beside the turn: the arguments and the answer go through
+	// that thread's state as for a served call, and guest memory is reached as any host thread may reach it.
+	uint64_t serve_beside(std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, const std::function<void()> &handler);
+	// Runs a handler written for x64 argument conventions on behalf of a 32-bit call: api_arguments and api_float_arguments answer from the
+	// given words, and return_api keeps its value for end_translated_call instead of resuming the guest.
 	void begin_translated_call(std::vector<uint64_t> words, std::array<uint64_t, 4> floats);
 	uint64_t end_translated_call();
 	// Low 64 bits of XMM0 to XMM3, where an x64 caller passes the first four floating-point arguments.
@@ -281,6 +293,8 @@ private:
 	bool queued_pending() const;
 	bool drain_queued_calls(bool all = false);
 	uint64_t serve_call(uint64_t stub, std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, bool queued = false);
+	uint64_t translated_call(std::vector<uint64_t> words, std::array<uint64_t, 4> floats, uint64_t stack, bool queued,
+		const std::function<void()> &handler);
 	bool inside_served_stub() const;
 	bool served_wait_trap(uint64_t address) const;
 	void protect_range(uint64_t address, size_t size, int protection, bool image);

@@ -1,9 +1,14 @@
 #include "threads.h"
+#include "cpu/agent.h"
+#include "cpu/agent_tasks.h"
 #include "kernel_waits.h"
 #include "cpu/agent_tasks.h"
 #include "cpu/call_cycles.h"
+#include "desktop_lock.h"
+#include "handle_channel.h"
 
 #include <cstdlib>
+#include <map>
 #include <fcntl.h>
 #include <iostream>
 
@@ -17,6 +22,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <poll.h>
+#include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <thread>
@@ -110,6 +116,10 @@ NativeThreads::NativeThreads(NativeProcess &process, NativeEnvironment &environm
 
 NativeThreads::~NativeThreads()
 {
+	if (std::getenv("RAVEN_TRACE_WAITS"))
+		std::fprintf(stderr,
+			"waits: conditions looked at %llu times\nwaits: processor times read %llu times\nwaits: stops seen late %llu times\n",
+			(unsigned long long)condition_looks.load(), (unsigned long long)processor_times.load(), (unsigned long long)late_stops.load());
 	if (shared_change_listener == wake)
 		shared_change_listener = -1;
 	process.set_time_slicing(std::chrono::milliseconds(0), nullptr, nullptr);
@@ -191,6 +201,12 @@ std::shared_ptr<GuestThread> NativeThreads::find(uint32_t id) const
 	return nullptr;
 }
 
+std::shared_ptr<GuestThread> NativeThreads::find_told(uint32_t id)
+{
+	std::lock_guard lock(gate);
+	return find(id);
+}
+
 std::shared_ptr<GuestThread> NativeThreads::create(uint64_t start, uint64_t parameter, uint64_t stack_size, bool suspended)
 {
 	if (process.parallel())
@@ -208,6 +224,13 @@ std::shared_ptr<GuestThread> NativeThreads::create(uint64_t start, uint64_t para
 	const auto range = memory.allocate(0, size + 4096, 0x2000, 1);
 	if (range.status)
 		throw std::runtime_error("native guest thread stack allocation failed");
+	// The host maps the stack as well: a call's arguments, results and return address are mostly there.
+	try {
+		process.share_memory(range.address, size + 4096);
+	} catch (...) {
+		memory.free(range.address, 0, 0x8000);
+		throw;
+	}
 	const uint64_t commit = std::min<uint64_t>(size, 64 * 1024), top = range.address + 4096 + size;
 	if (memory.allocate(top - commit, commit, 0x1000, 4).status) {
 		memory.free(range.address, 0, 0x8000);
@@ -230,7 +253,11 @@ std::shared_ptr<GuestThread> NativeThreads::create(uint64_t start, uint64_t para
 	thread->suspend_count = suspended ? 1 : 0;
 	if (threaded) {
 		thread->state = GuestThread::State::ready;
-		threads.push_back(thread);
+		{
+			// Under the gate as well as the turn: a host thread serving its guest beside the turn looks threads up by id (find_told).
+			std::lock_guard lock(gate);
+			threads.push_back(thread);
+		}
 		pthread_attr_t attributes;
 		pthread_attr_init(&attributes);
 		pthread_attr_setstacksize(&attributes, host_stack_size);
@@ -376,6 +403,11 @@ void NativeThreads::finish(GuestThread &thread, uint32_t code)
 	}
 	thread.exit_code = code;
 	thread.state = GuestThread::State::done;
+	{
+		std::lock_guard lock(thread.end_lock);
+		if (thread.end_object)
+			raven_waits_set(kernel_waits(), thread.end_object, nullptr);
+	}
 	for (const auto &listener : end_listeners)
 		listener(thread.id);
 	moved();
@@ -386,6 +418,21 @@ void NativeThreads::finish(GuestThread &thread, uint32_t code)
 		::close(report);
 	}
 	thread.exit_reports.clear();
+}
+
+GuestThread::~GuestThread()
+{
+	if (end_object)
+		raven_waits_close(kernel_waits(), end_object);
+}
+
+uint32_t NativeThreads::end_object(GuestThread &thread)
+{
+	// Made under the same lock its end sets it under, after the end marks the thread done: it is made set when the thread has ended.
+	std::lock_guard lock(thread.end_lock);
+	if (!thread.end_object)
+		thread.end_object = raven_waits_create(kernel_waits(), raven_manual_event, thread.state == GuestThread::State::done, 0);
+	return thread.end_object;
 }
 
 bool ThreadObject::describe(InheritedHandle &record) const
@@ -496,7 +543,7 @@ std::shared_ptr<GuestThread> NativeThreads::pick(bool include_current, bool only
 			continue;
 		}
 		if (thread->state == GuestThread::State::waiting) {
-			if ((thread->ready && thread->ready()) || (thread->wake && now >= *thread->wake))
+			if (thread->can_go_on() || (thread->wake && now >= *thread->wake))
 				return thread;
 		}
 	}
@@ -641,6 +688,14 @@ void NativeThreads::drain_wake()
 	process.drain_execution();
 }
 
+void NativeThreads::watch_added(int descriptor, short events)
+{
+	if (admin_hosted && std::none_of(admin_sources.begin(), admin_sources.end(), [&](const pollfd &source) {
+			return source.fd == descriptor && (source.events & events) == events;
+		}))
+		nudge();
+}
+
 void NativeThreads::nudge()
 {
 	const uint64_t one = 1;
@@ -672,6 +727,12 @@ std::function<void()> NativeThreads::remote_nudge() const
 bool NativeThreads::block(std::function<bool()> ready, std::optional<std::chrono::steady_clock::time_point> wake, bool turn, bool polled,
 	bool told)
 {
+	static const bool count_looks = std::getenv("RAVEN_TRACE_WAITS");
+	if (!std::exchange(lined_block, false) && count_looks && !turn)
+		ready = [this, inner = std::move(ready)] {
+			condition_looks.fetch_add(1, std::memory_order_relaxed);
+			return inner();
+		};
 	// A thread that gives its turn waits even when it could go on: the others that can run go first.
 	if (!turn && ready())
 		return true;
@@ -828,7 +889,7 @@ bool NativeThreads::hand_over()
 	for (const auto &thread : threads) {
 		if (thread.get() == running || thread->state != GuestThread::State::waiting || thread->suspend_count > 0)
 			continue;
-		if (thread->ready && thread->ready()) {
+		if (thread->can_go_on()) {
 			running->state = GuestThread::State::ready;
 			switch_to(*thread);
 			running->state = GuestThread::State::running;
@@ -903,7 +964,20 @@ static bool runnable(pid_t host, pid_t task)
 	return false;
 }
 
-bool NativeThreads::hand_over_to(uint32_t object)
+std::vector<NativeThreads::Waiter> NativeThreads::waiting_for(uint32_t object)
+{
+	std::vector<Waiter> found;
+	if (!object || table_waiters.load(std::memory_order_acquire) <= 0)
+		return found;
+	std::lock_guard lock(gate);
+	for (const auto &thread : threads)
+		if (thread.get() != running && thread->outside && thread->state == GuestThread::State::waiting &&
+			std::find(thread->waits_on.begin(), thread->waits_on.end(), object) != thread->waits_on.end())
+			found.push_back({thread.get(), thread->turns.load(std::memory_order_relaxed), thread->waits.load(std::memory_order_acquire)});
+	return found;
+}
+
+bool NativeThreads::hand_over_to(const std::vector<Waiter> &waited)
 {
 	if (!threaded || tearing_down || !running)
 		return false;
@@ -913,18 +987,17 @@ bool NativeThreads::hand_over_to(uint32_t object)
 		uint64_t turns;
 		std::chrono::steady_clock::time_point changed;
 		uint64_t waits;
-		// The processor time it had run when its turns last changed, and when it woke.
+		// The processor time it had run when first read after its turns last changed, and after it woke.
 		uint64_t ran = 0, woke = 0;
+	};
+	struct Busy {
+		Woken *woken;
+		pid_t host, task;
 	};
 	std::vector<Woken> waiting;
 	const auto started = std::chrono::steady_clock::now();
-	if (object && table_waiters.load(std::memory_order_acquire) > 0) {
-		std::lock_guard lock(gate);
-		for (const auto &thread : threads)
-			if (thread.get() != &me && thread->outside && thread->state == GuestThread::State::waiting &&
-				std::find(thread->waits_on.begin(), thread->waits_on.end(), object) != thread->waits_on.end())
-				waiting.push_back({thread.get(), thread->turns.load(std::memory_order_relaxed), started, thread->waits.load(std::memory_order_acquire)});
-	}
+	for (const auto &[thread, turns, waits] : waited)
+		waiting.push_back({thread, turns, started, waits});
 	// The waits that block in the runtime (those of a 32-bit guest, or on objects outside the table) are looked at as the serial
 	// hand_over does, with the turn still held.
 	for (const auto &thread : threads)
@@ -940,11 +1013,16 @@ bool NativeThreads::hand_over_to(uint32_t object)
 	// longer than that, and the setter would go on before it ended. A wait on the clock of a tenth of a second bounds a thread that gets
 	// no processor at all. One the set did not wake (an event reset on its own wakes one waiter) is not waited for. The setter sleeps
 	// between looks: on two processors, spinning took the one the woken thread needed and made each round trip a hundred times slower.
+	// Processor time is two files of /proc for each thread, so it is read only of a thread that has not waited again within a tenth of a
+	// millisecond, no more often than that, and without the gate, which the woken thread takes to wait again.
 	handing.fetch_add(1, std::memory_order_acq_rel);
+	std::vector<Busy> busy;
+	auto count_at = started + std::chrono::microseconds(100);
 	for (;;) {
 		const uint32_t seen = moves.load(std::memory_order_acquire);
 		const auto now = std::chrono::steady_clock::now();
 		bool any = false, settled = true;
+		busy.clear();
 		{
 			std::lock_guard lock(gate);
 			for (auto &woken : waiting) {
@@ -952,22 +1030,35 @@ bool NativeThreads::hand_over_to(uint32_t object)
 				if (turns == woken.turns && woken.changed == started)
 					continue;
 				any = true;
-				const uint64_t ran = thread_run_time(woken.thread->host_tid, woken.thread->snapshot.task);
-				if (woken.changed == started)
-					woken.woke = ran;
 				if (turns != woken.turns) {
 					woken.turns = turns;
 					woken.changed = now;
-					woken.ran = ran;
+					woken.ran = 0;
 				}
 				// A thread that woke is still in its old wait when it takes the turn, and its next call may be served in that same turn:
 				// only a wait it began since is a new one.
 				const bool waits = woken.thread->waits.load(std::memory_order_acquire) != woken.waits;
-				// Where the scheduler keeps no count, the clock stands in for it.
-				const bool spent = ran ? ran - woken.ran >= 1000000 || ran - woken.woke >= 5000000 :
-					now - woken.changed >= std::chrono::milliseconds(1) || now - started >= std::chrono::milliseconds(5);
-				if (!(woken.thread->state == GuestThread::State::done || waits || spent))
-					settled = false;
+				if (woken.thread->state != GuestThread::State::done && !waits)
+					busy.push_back({&woken, woken.thread->host_tid, woken.thread->snapshot.task});
+			}
+		}
+		if (!busy.empty()) {
+			settled = now >= count_at;
+			if (settled) {
+				for (const auto &[woken, host, task] : busy) {
+					const uint64_t ran = thread_run_time(host, task);
+					processor_times.fetch_add(1, std::memory_order_relaxed);
+					if (!woken->ran)
+						woken->ran = ran;
+					if (!woken->woke)
+						woken->woke = ran;
+					// Where the scheduler keeps no count, the clock stands in for it.
+					const bool spent = ran ? ran - woken->ran >= 1000000 || ran - woken->woke >= 5000000 :
+						now - woken->changed >= std::chrono::milliseconds(1) || now - started >= std::chrono::milliseconds(5);
+					if (!spent)
+						settled = false;
+				}
+				count_at = now + std::chrono::microseconds(100);
 			}
 		}
 		// None came yet: the set woke none of them, unless one stands woken and waits for a processor.
@@ -1124,6 +1215,7 @@ void NativeThreads::moved()
 
 void NativeThreads::install(GuestThread &me)
 {
+	desktop_lock().resume(std::exchange(me.desktop_depth, 0u));
 	me.turns.fetch_add(1, std::memory_order_relaxed);
 	moved();
 	running = &me;
@@ -1153,6 +1245,27 @@ void NativeThreads::install(GuestThread &me)
 	if (me.state == GuestThread::State::done)
 		throw ThreadExit{me.exit_code};
 	check_pending();
+}
+
+void NativeThreads::announce(GuestThread &self, std::span<const uint32_t> objects)
+{
+	{
+		std::lock_guard lock(gate);
+		self.waits_on.assign(objects.begin(), objects.end());
+	}
+	table_waiters.fetch_add(1, std::memory_order_release);
+	for (const uint32_t object : objects)
+		table_waited[object % table_waited.size()].fetch_add(1, std::memory_order_acq_rel);
+}
+
+void NativeThreads::withdraw(GuestThread &self)
+{
+	// Only its own thread changes waits_on, so it reads them without the gate.
+	for (const uint32_t object : self.waits_on)
+		table_waited[object % table_waited.size()].fetch_sub(1, std::memory_order_release);
+	table_waiters.fetch_sub(1, std::memory_order_release);
+	std::lock_guard lock(gate);
+	self.waits_on.clear();
 }
 
 std::optional<uint32_t> NativeThreads::wait_beside(std::span<const uint32_t> objects, bool all, uint32_t milliseconds)
@@ -1185,10 +1298,7 @@ std::optional<uint32_t> NativeThreads::wait_beside(std::span<const uint32_t> obj
 		me->state = GuestThread::State::waiting;
 		me->waits.fetch_add(1, std::memory_order_release);
 	}
-	me->waits_on.assign(objects.begin(), objects.end());
-	table_waiters.fetch_add(1, std::memory_order_release);
-	for (const uint32_t object : objects)
-		table_waited[object % table_waited.size()].fetch_add(1, std::memory_order_acq_rel);
+	announce(*me, objects);
 	// Going to wait counts as a move, as for a wait outside; waking does not, so a setter handing over waits for the guest to go on.
 	moved();
 	uint32_t result = raven_wait_interrupted;
@@ -1206,19 +1316,16 @@ std::optional<uint32_t> NativeThreads::wait_beside(std::span<const uint32_t> obj
 		if (me->unwinding || me->state == GuestThread::State::done)
 			break;
 	}
-	for (const uint32_t object : objects)
-		table_waited[object % table_waited.size()].fetch_sub(1, std::memory_order_release);
-	table_waiters.fetch_sub(1, std::memory_order_release);
-	me->waits_on.clear();
+	withdraw(*me);
 	{
 		std::lock_guard lock(gate);
 		me->outside = false;
 		if (me->state == GuestThread::State::waiting)
 			me->state = GuestThread::State::running;
 	}
-	// Woken, it runs again as if it had taken a turn: the setter sees it move and waits until it calls, waits again or ends.
+	// Woken, it runs again as if it had taken a turn, which a setter handing over finds at its next look. It is not woken to see so: it
+	// could only sleep again until this thread waits again or ends, which wake it, and would take the processor this thread needs.
 	me->turns.fetch_add(1, std::memory_order_relaxed);
-	moved();
 	// Interrupted for anything but a job, or failed, the wait took nothing: the usual way waits again and finds out why.
 	if (result == raven_wait_interrupted || result == raven_wait_failed || result == raven_wait_ended || (limited && result == 0x102))
 		return std::nullopt;
@@ -1393,6 +1500,9 @@ void NativeThreads::wake_ready(GuestThread *except, bool all)
 
 void NativeThreads::leave(GuestThread &me, bool save)
 {
+	// The desktop lock is only ever taken after the runtime: whoever gives the runtime up gives the lock up with it.
+	if (const unsigned held = desktop_lock().suspend())
+		me.desktop_depth = held;
 	const auto now = std::chrono::steady_clock::now();
 	if (save && !process.gone())
 		me.snapshot = process.save_thread(false);
@@ -1547,8 +1657,10 @@ int NativeThreads::park(pid_t task, std::chrono::steady_clock::time_point limit,
 		signaled();
 	// A guest that calls again at once finds its host thread still with the runtime: giving the runtime up and taking it back costs more
 	// than most calls. It is kept for a few microseconds only, and only while no other thread waits for it.
-	if (block)
-		for (unsigned looks = 0; looks < 256 && !lined.load(std::memory_order_relaxed); ++looks) {
+	if (block) {
+		const uint32_t *const stop = agent::stop_word(task);
+		unsigned looks = 0;
+		for (; looks < 256 && !lined.load(std::memory_order_relaxed); ++looks) {
 			if (__atomic_load_n(&block[0], __ATOMIC_ACQUIRE)) {
 				// One that needs nothing of the runtime is answered here and the guest goes on; one that has to block parks first.
 				beside_wanted = false;
@@ -1563,8 +1675,14 @@ int NativeThreads::park(pid_t task, std::chrono::steady_clock::time_point limit,
 				CallCycles::instance().waited_turn(0);
 				return -4;
 			}
+			// A guest that stopped leaves no call in its block: it is waited for, which finds the stop at once.
+			if (stop && __atomic_load_n(stop, __ATOMIC_ACQUIRE) == agent::posted)
+				break;
 			__builtin_ia32_pause();
 		}
+		if (looks == 256 && stop && __atomic_load_n(stop, __ATOMIC_ACQUIRE) == agent::posted)
+			late_stops.fetch_add(1, std::memory_order_relaxed);
+	}
 	{
 		std::lock_guard lock(gate);
 		me.parked = true;
@@ -1756,15 +1874,30 @@ void NativeThreads::admin_main()
 	admin.host_tid = pid_t(::gettid());
 	NativeProcess::arm_host_thread();
 	NativeProcess::adopt_task(admin.snapshot.task);
+	// Requests of other processes (DuplicateHandle into this one, its memory) and the host I/O that pending operations wait for are
+	// answered by serve() and the pumps: their descriptors wake this thread. They are gathered in its turn, where they change. One
+	// still ready at two gathers in a row, with the pumps run between them, is one nothing here finishes (closed, hung up, or ready for
+	// what no operation asked): it is left out until a gather finds it quiet, or it would wake this thread again and again.
+	std::vector<int> ready_before;
+	// The set this thread sleeps in, made in its turn from what it gathered there. A poll would hold every file it waits on open, so a
+	// socket the guest closed meanwhile would keep its bound address until the sleep ended; the kernel takes a released file out of an
+	// epoll set by itself. Without a set the thread sleeps on `wake` alone.
+	int sleep_set = -1;
 	for (;;) {
-		std::vector<pollfd> descriptors{{wake, POLLIN, 0}};
 		auto now = std::chrono::steady_clock::now();
 		auto until = std::min(admin_due, now + std::chrono::milliseconds(20));
 		{
 			// The administrative thread works only when no guest thread does the host's work for it.
-			const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(until > now ? until - now : std::chrono::nanoseconds(0)).count();
-			const timespec timeout{left / 1000000000, left % 1000000000};
-			::ppoll(descriptors.data(), descriptors.size(), &timeout, nullptr);
+			const auto left = std::chrono::ceil<std::chrono::milliseconds>(until > now ? until - now : std::chrono::steady_clock::duration::zero());
+			if (sleep_set < 0) {
+				pollfd only{wake, POLLIN, 0};
+				::poll(&only, 1, int(left.count()));
+			} else {
+				epoll_event ready[8];
+				::epoll_wait(sleep_set, ready, 8, int(left.count()));
+				::close(sleep_set);
+				sleep_set = -1;
+			}
 		}
 		uint64_t drained = 0;
 		while (::read(wake, &drained, sizeof drained) > 0) {}
@@ -1785,9 +1918,36 @@ void NativeThreads::admin_main()
 		try {
 			if (process.gone())
 				throw ThreadExit{0};
+			admin_sources.clear();
 			serve();
 			for (const auto &pump : pumps)
 				pump();
+			std::vector<pollfd> sources;
+			for (const int channel : handle_descriptors())
+				sources.push_back({channel, POLLIN, 0});
+			if (watched)
+				watched(sources);
+			::poll(sources.data(), sources.size(), 0);
+			std::vector<int> ready;
+			for (const auto &source : sources)
+				if (source.revents)
+					ready.push_back(source.fd);
+			std::erase_if(sources, [&](const pollfd &source) {
+				return source.revents && std::find(ready_before.begin(), ready_before.end(), source.fd) != ready_before.end();
+			});
+			ready_before = std::move(ready);
+			admin_sources = std::move(sources);
+			std::map<int, uint32_t> interest{{wake, EPOLLIN}};
+			for (const auto &source : admin_sources)
+				interest[source.fd] |= uint32_t(uint16_t(source.events));
+			sleep_set = ::epoll_create1(EPOLL_CLOEXEC);
+			for (const auto &[descriptor, events] : interest) {
+				epoll_event event{};
+				event.events = events;
+				event.data.fd = descriptor;
+				if (sleep_set >= 0)
+					::epoll_ctl(sleep_set, EPOLL_CTL_ADD, descriptor, &event);
+			}
 			// When every thread waits without a timeout for what only another of them could give, and no other process, host source
 			// or window system can end a wait either, the run is over: the main thread is told so.
 			bool stuck = !tearing_down && !pending && !poll && !shared_object_count.load() &&
@@ -1829,7 +1989,7 @@ void NativeThreads::admin_main()
 			if (thread->state == GuestThread::State::waiting && thread->wake)
 				admin_due = std::min(admin_due, *thread->wake);
 		// What the services and pumps brought in, and what no call announces, is looked at for every waiting thread.
-		scanned = {};
+		scanned = leave_scanned = {};
 		try {
 			leave(admin);
 		} catch (...) {
@@ -1859,6 +2019,37 @@ bool NativeThreads::threaded_block(std::function<bool()> &ready, std::optional<s
 		if (!ready || ready() || (wake && std::chrono::steady_clock::now() >= *wake))
 			return true;
 	}
+}
+
+uint32_t NativeThreads::wait_in_line(const std::vector<uint32_t> &table, bool all, bool alertable,
+	std::optional<std::chrono::steady_clock::time_point> wake)
+{
+	auto &me = *running;
+	if (threaded || me.granted)
+		return raven_wait_unlined;
+	static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t));
+	std::atomic<uint32_t> told{0};
+	const uint32_t lined = raven_waits_line_up(kernel_waits(), me.id, table.data(), uint32_t(table.size()), all, alertable,
+		reinterpret_cast<uint32_t *>(&told));
+	if (lined != raven_wait_lined)
+		return lined;
+	// The thread leaves the line however the block ends, an error or the end of the process included: the table keeps the word until then.
+	struct Leave {
+		GuestThread &thread;
+		bool left = false;
+		~Leave()
+		{
+			thread.granted = nullptr;
+			if (!left)
+				raven_waits_leave(kernel_waits(), thread.id);
+		}
+	} leave_line{me};
+	me.granted = &told;
+	lined_block = true;
+	block([&told] { return told.load(std::memory_order_acquire) != 0; }, wake);
+	me.granted = nullptr;
+	leave_line.left = true;
+	return raven_waits_leave(kernel_waits(), me.id);
 }
 
 uint32_t NativeThreads::wait_outside(const std::function<uint32_t(std::optional<std::chrono::steady_clock::time_point>)> &wait,

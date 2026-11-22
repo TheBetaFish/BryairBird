@@ -333,6 +333,12 @@ bool held(pid_t task)
 	return find(task) != nullptr;
 }
 
+uint64_t *block_of(pid_t task)
+{
+	const Task *const found = find(task);
+	return found ? found->block : nullptr;
+}
+
 long request(enum __ptrace_request operation, pid_t task, void *address, void *data)
 {
 	if (Task *const found = find(task))
@@ -379,6 +385,12 @@ int interrupt(pid_t task)
 	if (Task *const found = find(task))
 		return int(syscall(SYS_tgkill, found->group, task, interrupt_signal));
 	return kill(task, SIGSTOP);
+}
+
+const uint32_t *stop_word(pid_t task)
+{
+	const Task *const found = find(task);
+	return found ? state_word(*found) : nullptr;
 }
 
 bool stopped(pid_t task)

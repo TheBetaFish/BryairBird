@@ -74,7 +74,9 @@ public:
 	static constexpr size_t screen_caps = 0x400, screen_dc = 0x600, screen_dc_state = 0x608;
 	void set_screen_block(uint64_t *block) { screen_block = reinterpret_cast<uint8_t *>(block); }
 	// A call the runtime serves with the published screen context as its first argument may change it: the guest's ReleaseDC then
-	// leaves it to the runtime. Called before every served call.
+	// leaves it to the runtime. Called before every served call, with its first argument.
+	void screen_dc_use(std::string_view name, uint64_t first);
+	// The same for a call served in the turn, whose first argument is read only when a context is published.
 	void screen_dc_use(std::string_view name);
 	// The window table the guest's window preludes read: a record of 256 bytes for each window, at its handle's low nine bits, and
 	// the offsets in a record. The runtime brings the records of the windows it touched up to date before the guest runs again; a
@@ -144,6 +146,11 @@ public:
 	// run while the runtime serves another read a table only between two looks at an even count that did not change.
 	static constexpr size_t table_version=0x7b0;
 	void publish_windows();
+	// Whether the guest logged drawing for the runtime to carry out, which it does without a call.
+	bool drawing_logged() const
+	{
+		return deferred_log && __atomic_load_n(reinterpret_cast<const uint32_t *>(deferred_log), __ATOMIC_ACQUIRE) != 0;
+	}
 	void api_entered() { ++api_depth; }
 	void api_left();
 	// user32 entry points that follow the shared registry conventions; every handler runs on the calling guest thread.
@@ -152,6 +159,8 @@ public:
 	void drawing(uint64_t window, const DesktopRect *area = nullptr);
 	void present_drawn(uint64_t window);
 	void flush_dirty(bool force = false);
+	// Shows waiting frames on the calling thread. Returns when to look again, as often as message retrieval looks.
+	std::chrono::steady_clock::time_point present_frames();
 	// Whether a message, paint request or due timer waits for the guest; host input is delivered to the windows on the way, so this
 	// runs only inside a call of the guest thread.
 	bool input_ready();
@@ -232,6 +241,10 @@ private:
 	// A message to a window of another process: the owner's answer, or nothing when it gave none in time.
 	std::optional<uint64_t> send_foreign(uint64_t window,uint32_t message,uint64_t wparam,uint64_t lparam,std::chrono::milliseconds timeout);
 	void import_foreign_frames();
+	// What flush_dirty shows, without the focus change it settles first.
+	void present_dirty(bool force = false);
+	// When to look again for frames of other processes: at `limit`, or 8 ms after the last look while one draws into a window.
+	std::chrono::steady_clock::time_point foreign_look(std::chrono::steady_clock::time_point limit) const;
 	uint8_t *screen_block=nullptr;
 	// A table entry handed out while calls were in progress, with the depth of the outermost of them: it is compared again before the
 	// guest runs until that call returns, as the call may change it through a pointer it took before a callback.
@@ -319,7 +332,8 @@ private:
 	bool keep_host_window=false;
 	// A top-level window's surface released while it is resized, kept for the new size when it fits: making a surface maps fresh pages
 	// into both processes.
-	struct SpareSurface { std::shared_ptr<SharedPixels> pixels; uint64_t address=0; size_t size=0; uint32_t width=0,height=0; };
+	// client: where the client area lay in the pixels.
+	struct SpareSurface { std::shared_ptr<SharedPixels> pixels; uint64_t address=0; size_t size=0; uint32_t width=0,height=0; DesktopRect client{}; };
 	std::map<uint64_t,SpareSurface> spare_surfaces;
 	bool resizing=false;
 	// Windows that SetWindowPos is placing: their WM_MOVE and WM_SIZE come from the default answer to WM_WINDOWPOSCHANGED instead.
@@ -367,7 +381,10 @@ private:
 	void place_pointer(const DesktopEvent &event,uint32_t message,uint32_t buttons,int64_t x,int64_t y);
 	void release_held_input();
 	std::deque<DesktopEvent> held_input;
-	uint64_t retrieve(std::span<const uint64_t> arguments,bool blocking);
+	// `beside` writes the message for a PeekMessage served beside the turn (see register_api), which leaves to the turn whatever would run
+	// a procedure of the guest.
+	uint64_t retrieve(std::span<const uint64_t> arguments,bool blocking,
+		const std::function<void(uint64_t,std::span<const uint8_t>)> *beside=nullptr);
 	void post(uint64_t window,uint32_t message,uint64_t wparam,uint64_t lparam);
 	uint64_t surface_dc(uint64_t window);
 	bool tree_dispatch(std::string_view name);

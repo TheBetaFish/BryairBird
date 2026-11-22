@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include "clock_calibration.h"
 #include <cpuid.h>
+#include <x86intrin.h>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -301,6 +303,35 @@ uint64_t counter_ticks()
 	timespec now{};
 	::clock_gettime(CLOCK_MONOTONIC, &now);
 	return uint64_t(now.tv_sec) * 10000000ULL + uint64_t(now.tv_nsec) / 100;
+}
+
+// The closest of a few readings of the clock, each between two of the counter: the counter is the one before, so a count that goes on
+// from the sample is never behind the clock's.
+ClockSample clock_sample()
+{
+	ClockSample best{};
+	uint64_t closest = UINT64_MAX;
+	for (int reading = 0; reading < 8; ++reading) {
+		timespec now{};
+		const uint64_t before = __rdtsc();
+		::clock_gettime(CLOCK_MONOTONIC, &now);
+		const uint64_t after = __rdtsc();
+		if (after - before < closest) {
+			closest = after - before;
+			best = {before, uint64_t(now.tv_sec) * 1000000000ULL + uint64_t(now.tv_nsec), 0};
+		}
+	}
+	timespec awake{}, all{};
+	::clock_gettime(CLOCK_MONOTONIC, &awake);
+	::clock_gettime(CLOCK_BOOTTIME, &all);
+	best.slept = uint64_t((int64_t(all.tv_sec) - awake.tv_sec) * 1000000000LL + (int64_t(all.tv_nsec) - awake.tv_nsec));
+	return best;
+}
+
+const ClockSample &clock_origin()
+{
+	static const ClockSample origin = clock_sample();
+	return origin;
 }
 
 // The local time at the start of the current second and the performance counter span of that second, for a GetLocalTime the
@@ -1308,10 +1339,12 @@ void register_system_api(ApiRegistry &registry, KernelContext &context)
 	registry.add("GetSystemPreferredUILanguages", 4, preferred_languages);
 	registry.add("GetProcessPreferredUILanguages", 4, preferred_languages);
 	// The list stays the one language the runtime speaks; a program asking for another finds that out from the getters.
-	registry.add("SetThreadPreferredUILanguages", 3, [](ApiCall &call) {
+	const auto set_languages = [](ApiCall &call) {
 		if (call[2]) call.store<uint32_t>(call[2], 1);
 		call.ret(1);
-	});
+	};
+	registry.add("SetThreadPreferredUILanguages", 3, set_languages);
+	registry.add("SetProcessPreferredUILanguages", 3, set_languages);
 	// Power: always on mains power, no battery, nothing to suspend.
 	registry.add("GetSystemPowerStatus", 1, [](ApiCall &call) {
 		if (!call[0]) {
@@ -1339,6 +1372,16 @@ void register_system_api(ApiRegistry &registry, KernelContext &context)
 	});
 	registry.add("RegisterSuspendResumeNotification", 2, [](ApiCall &call) { call.ret(1); });
 	registry.add("UnregisterSuspendResumeNotification", 1, [](ApiCall &call) { call.ret(1); });
+	// The same registration as powrprof offers it: the handle goes to the caller's variable, and the result is an error code.
+	registry.add("PowerRegisterSuspendResumeNotification", 3, [](ApiCall &call) {
+		if (!call[1] || !call[2]) {
+			call.ret(87);
+			return;
+		}
+		call.store_pointer(call[2], 1);
+		call.ret(0);
+	});
+	registry.add("PowerUnregisterSuspendResumeNotification", 1, [](ApiCall &call) { call.ret(0); });
 	// Giving pages back changes nothing the program can see here.
 	registry.add("DiscardVirtualMemory", 2, [](ApiCall &call) { call.ret(0); });
 	// The display is 96 dpi and every process counts as aware of it (IsProcessDPIAware): the awareness a process asks for is kept and

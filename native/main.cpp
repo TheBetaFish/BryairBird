@@ -18,6 +18,7 @@
 #include "nt/text.h"
 #include "nt/system_exports.h"
 #include "nt/warm_host.h"
+#include "nt/clock_calibration.h"
 #ifdef RAVEN_OPENGL
 #include "graphics/opengl_bridge.h"
 #endif
@@ -184,6 +185,10 @@ static void show_fault(int signal)
 
 int main(int argc, char **argv)
 {
+#ifdef RAVEN_NATIVE_CPU
+	// The guest's clock is calibrated from here to when the guest starts.
+	raven::clock_origin();
+#endif
 	if (std::getenv("RAVEN_BACKTRACE")) {
 		std::set_terminate(show_backtrace);
 		std::signal(SIGSEGV, show_fault);
@@ -287,6 +292,7 @@ int main(int argc, char **argv)
 		}
 		else if (option.starts_with("--inherit-fd=")) inherit_fd=std::atoi(std::string(option.substr(13)).c_str());
 		else if (option.starts_with("--handle-channel-fd=")) handle_channel_fd=std::atoi(std::string(option.substr(20)).c_str());
+		else if (option.starts_with("--host-broker-fd=")) raven::adopt_host_broker(std::atoi(std::string(option.substr(17)).c_str()));
 		else if (option.starts_with("--diagnostics-fd=")) {
 			// The runtime's own messages go where the parent runtime writes its own; the program's standard error moves out of their way
 			// to a descriptor of its own, so nothing the runtime says ever lands in a pipe the program reads.

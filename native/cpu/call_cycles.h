@@ -16,11 +16,15 @@
 
 namespace raven {
 
-// What the calls through served stubs cost, in time stamp counter cycles, when RAVEN_CYCLES is set to the seconds between reports. A call is cut in four: the boundary, from the stub taking its arguments to the runtime seeing the call, less the turn; the turn,
-// the part of the boundary its host thread waited for the runtime while other threads had it; the service, from the call seen to the
-// runtime answering; the return, from the answer to the guest going on with it. The stub stamps the two guest ends in the thread's block
-// (gates.S), the runtime the two in between; the return of a call is known when the next call on the same block is seen. Calls answered
-// beside the turn (see NativeProcess::serve_alone) are counted apart as well, as they have no turn to wait for.
+// What the calls through served stubs cost, and the NT system calls of threads in the agent's hands (timed in its handler, agent.S), in
+// time stamp counter cycles, when RAVEN_CYCLES is set to the seconds between reports. A call is cut in four: the boundary, from the stub
+// taking its arguments to the runtime seeing the call, less the turn; the turn, the part of the boundary its host thread waited for the
+// runtime while other threads had it; the service, from the call seen to the runtime answering; the return, from the answer to the guest
+// going on with it. The stub stamps the two guest ends in the thread's block (gates.S), the runtime the two in between; the return of a
+// call is known when the next call on the same block is seen. Calls answered beside the turn (see NativeProcess::serve_alone) are counted
+// apart as well, as they have no turn to wait for. Apart again, the part of the service a call spent waiting for the desktop's lock while
+// another thread held it (see DesktopLock). And the times the host had the kernel copy guest memory for the calls, which costs far
+// more than memory both sides map.
 class CallCycles {
 public:
 	static CallCycles &instance()
@@ -33,6 +37,14 @@ public:
 	{
 		std::lock_guard lock(mutex);
 		names = std::move(stubs);
+	}
+	// A system call is counted by its number, which no stub's address equals; its name is known once it is served.
+	void name_service(uint64_t number, const std::string &name)
+	{
+		if (!enabled())
+			return;
+		std::lock_guard lock(mutex);
+		names.try_emplace(number, name);
 	}
 	// The runtime sees the call `stub` in `block` at `now`: the cycles it returns are the time it was seen, for answered(). A call answered
 	// beside the turn is counted once it is known to be answered there, with the time it was seen.
@@ -72,6 +84,8 @@ public:
 			entry.service += now - since;
 		if (beside)
 			++entry.beside;
+		entry.locked += std::exchange(locked, 0);
+		entry.copies += std::exchange(copies, 0);
 		report();
 	}
 	// The host thread of the calling thread waited `cycles` for the runtime's turn before it saw the call it is about to see; 0 when it
@@ -80,6 +94,18 @@ public:
 	{
 		if (enabled())
 			waited = cycles;
+	}
+	// The host thread waited `cycles` for a lock another thread held, in the call it serves.
+	void waited_lock(uint64_t cycles)
+	{
+		if (enabled())
+			locked += cycles;
+	}
+	// The host thread had the kernel copy guest memory, in the call it serves.
+	void copied()
+	{
+		if (enabled())
+			++copies;
 	}
 	~CallCycles()
 	{
@@ -91,7 +117,7 @@ public:
 
 private:
 	struct Entry {
-		uint64_t count = 0, returns = 0, beside = 0, boundary = 0, turn = 0, service = 0, back = 0;
+		uint64_t count = 0, returns = 0, beside = 0, boundary = 0, turn = 0, service = 0, back = 0, locked = 0, copies = 0;
 	};
 	// A stretch longer than this many cycles (about a second) is a guest that was stopped or descheduled, not the cost of a call.
 	static constexpr uint64_t limit = 4'000'000'000ULL;
@@ -102,6 +128,10 @@ private:
 	std::map<uint64_t, Entry> calls;
 	// The turn the host thread waited for, kept until the call it waited for is seen.
 	static inline thread_local uint64_t waited = 0;
+	// The lock the host thread waited for in the call it serves, kept until it answers it.
+	static inline thread_local uint64_t locked = 0;
+	// The kernel's copies of guest memory, kept until the call they were made for is answered.
+	static inline thread_local uint64_t copies = 0;
 
 	void report(bool ending = false)
 	{
@@ -125,12 +155,14 @@ private:
 		const auto per = [](uint64_t total, uint64_t count) { return (unsigned long long)(count ? total / count : 0); };
 		std::fprintf(stderr, "cycles: %llu calls, %llu beside the turn, per call boundary %llu turn %llu service %llu return %llu\n",
 			(unsigned long long)count, (unsigned long long)beside, per(boundary, count), per(turn, count), per(service, count), per(back, returns));
-		for (size_t index = 0; index < order.size() && index < 12; ++index) {
+		// The costliest dozen while the program runs; every call in the report the run ends with.
+		for (size_t index = 0; index < order.size() && (ending || index < 12); ++index) {
 			const auto &entry = calls[order[index].second];
 			const auto name = names.find(order[index].second);
-			std::fprintf(stderr, "cycles:   %-32s %8llu calls %8llu beside  boundary %7llu  turn %9llu  service %9llu  return %7llu\n",
+			std::fprintf(stderr, "cycles:   %-32s %8llu calls %8llu beside  boundary %7llu  turn %9llu  service %9llu  return %7llu  lock %9llu  copies %8llu\n",
 				name == names.end() ? "?" : name->second.c_str(), (unsigned long long)entry.count, (unsigned long long)entry.beside,
-				per(entry.boundary, entry.count), per(entry.turn, entry.count), per(entry.service, entry.count), per(entry.back, entry.returns));
+				per(entry.boundary, entry.count), per(entry.turn, entry.count), per(entry.service, entry.count), per(entry.back, entry.returns),
+				per(entry.locked, entry.count), (unsigned long long)entry.copies);
 		}
 		calls.clear();
 	}

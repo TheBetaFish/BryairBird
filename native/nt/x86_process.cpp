@@ -1272,6 +1272,7 @@ NativeResult run_native_process_x86(ModuleSet &modules, PEModule &entry,
 			// component: the call goes on there with the same arguments, so handlers that resume elsewhere, as a C++ catch does, never return
 			// to the runtime. The vectored handler lists live there too, and fibers, which the thread switches by itself.
 			static const std::map<std::string_view, std::string_view> in_runtime{{"RaiseException", "raven_raise_exception"},
+				{"DebugBreak", "raven_debug_break"},
 				{"RtlUnwind", "raven_unwind"}, {"AddVectoredExceptionHandler", "raven_add_vectored_exception"},
 				{"RtlAddVectoredExceptionHandler", "raven_add_vectored_exception"},
 				{"AddVectoredContinueHandler", "raven_add_vectored_continue"}, {"RtlAddVectoredContinueHandler", "raven_add_vectored_continue"},
@@ -1303,7 +1304,8 @@ NativeResult run_native_process_x86(ModuleSet &modules, PEModule &entry,
 						return std::find(symbol.names.begin(), symbol.names.end(), wanted) != symbol.names.end();
 					});
 					if (found != exports.end()) {
-						if (api == "RtlUnwind")
+						// A call of DebugBreak is a new breakpoint, not a handler that came back to the last one.
+						if (api == "RtlUnwind" || api == "DebugBreak")
 							fault_loops[guest_threads.current_id()].rounds = 0;
 						auto native = process.context();
 						native.registers.rip = component->second->loaded.base() + found->address;
@@ -1475,8 +1477,10 @@ NativeResult run_native_process_x86(ModuleSet &modules, PEModule &entry,
 	compat.set_global_blocks([&allocator](uint64_t address) { return allocator.size(address); }, [&allocator](uint64_t address) { return allocator.release(address); });
 	KernelContext kernel{process, environment, memory, allocator, kernel_objects, guest_threads, paths, modules, entry, *launch, invoke};
 	guest_threads.set_watched([reactor = kernel.reactor](std::vector<pollfd> &descriptors) { reactor->watch(descriptors); });
+	kernel.reactor->set_watch_added([&guest_threads](int descriptor, short events) { guest_threads.watch_added(descriptor, events); });
 	// Waits that also wake for messages ask the window system, and the window system sleeps as the scheduler does.
 	kernel.queue_status = [&windows](uint32_t thread,uint32_t mask,bool clear) { return windows.queue_status(thread,mask,clear); };
+	kernel.present_frames = [&windows] { return windows.present_frames(); };
 	kernel.module_named = [&module_api](uint64_t address, bool wide) { return module_api.module_handle(address, wide); };
 	windows.set_idle_sources([&guest_threads](std::chrono::steady_clock::time_point limit) { return guest_threads.idle_until(limit); },
 		[&guest_threads](std::vector<pollfd> &descriptors) { guest_threads.idle_descriptors(descriptors); }, [&guest_threads] { guest_threads.drain_wake(); });
