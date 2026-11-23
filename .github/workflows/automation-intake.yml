@@ -1,0 +1,117 @@
+name: Automation intake
+
+on:
+  issues:
+    types: [labeled]
+  workflow_run: # zizmor: ignore[dangerous-triggers] Only reads workflow metadata and creates an issue; no checkout or artifact execution.
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automation-intake-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  queue-local-work:
+    name: Queue labelled issue
+    if: github.event_name == 'issues' && (github.event.label.name == 'ai-task' || github.event.label.name == 'bug')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # Adds the local-ready label and posts the owner instructions.
+    steps:
+      - name: Mark the issue as ready for the local worker
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const marker = '<!-- bryairbird-local-worker-intake -->';
+            const labelName = 'automation: local-ready';
+            const labels = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100
+            });
+            if (!labels.data.some(label => label.name === labelName)) {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: labelName, color: '1d76db',
+                description: 'Ready for the owner-triggered local-only AI worker'
+              });
+            }
+            const current = (issue.labels || []).map(label => label.name);
+            if (!current.includes(labelName)) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, labels: [labelName]
+              });
+            }
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number
+            });
+            if (!comments.some(comment => comment.body.includes(marker))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number,
+                body: marker + '\n' +
+                  'This issue is queued for **local-only automation**. No hosted AI model is used. ' +
+                  'The repository owner can run **Actions → Local AI worker (strict $0)** with this issue number. ' +
+                  'The worker requires the labelled self-hosted runner and locally installed Ollama/Aider models. ' +
+                  'It creates a pull request for human review; it never merges.'
+              });
+            }
+
+  report-main-ci-failure:
+    name: Report failed main CI
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # Creates a deduplicated CI diagnostic issue.
+    steps:
+      - name: Open one diagnostic issue for the failed main CI run
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const marker = '<!-- bryairbird-ci-run:' + run.id + ' -->';
+            const labelName = 'ci-failure';
+            const labels = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100
+            });
+            if (!labels.data.some(label => label.name === labelName)) {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: labelName, color: 'd73a4a',
+                description: 'Automatically opened for a failed CI run on main'
+              });
+            }
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', per_page: 100
+            });
+            if (openIssues.some(issue => issue.body && issue.body.includes(marker)))
+              return;
+            const shortSha = (run.head_sha || '').slice(0, 7);
+            const body = [
+              marker,
+              '## Main branch CI failed',
+              '',
+              '- Commit: ' + run.head_sha,
+              '- Workflow run: ' + run.html_url,
+              '- Run number: ' + run.run_number,
+              '- Triggering actor: ' + (run.triggering_actor && run.triggering_actor.login || 'unknown'),
+              '',
+              'This issue was created by deterministic automation. Open the run and inspect the failed job logs; ' +
+                'the local AI worker is optional and does not replace CI evidence.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: 'CI failure on main: ' + shortSha,
+              body,
+              labels: [labelName]
+            });

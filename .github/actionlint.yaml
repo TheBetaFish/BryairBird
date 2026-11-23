@@ -1,4 +1,4 @@
-# GitHub's Ubuntu 26.04 image is newer than the runner labels actionlint knows.
 self-hosted-runner:
   labels:
+    - bryairbird-ai
     - ubuntu-26.04

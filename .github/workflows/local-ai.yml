@@ -1,0 +1,65 @@
+name: Local AI worker (strict $0)
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Open issue number labelled ai-task or bug
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-ai-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    name: Local coder and reviewer
+    if: github.actor == 'TheBetaFish'
+    runs-on: [self-hosted, linux, x64, bryairbird-ai] # zizmor: ignore[self-hosted-runner] Owner-only local-model runner; no PR event is executed here.
+    timeout-minutes: 360
+    permissions:
+      contents: write # Pushes the isolated worker branch.
+      pull-requests: write # Opens a draft or ready-for-review PR.
+      issues: read # Reads the owner-authored issue.
+      actions: write # Dispatches the existing CI workflow for each revision.
+    env:
+      OLLAMA_HOST: http://127.0.0.1:11434
+      BRYAIRBIRD_CODER_MODEL: ${{ vars.BRYAIRBIRD_CODER_MODEL || 'qwen2.5-coder:3b' }}
+      BRYAIRBIRD_REVIEWER_MODEL: ${{ vars.BRYAIRBIRD_REVIEWER_MODEL || 'qwen2.5:3b' }}
+    steps:
+      - name: Checkout the trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check local runner prerequisites
+        run: |
+          set -euo pipefail
+          command -v python3
+          command -v cargo
+          command -v gh
+          command -v aider
+          command -v ollama
+          python3 --version
+          cargo --version
+          aider --version
+          ollama list
+
+      - name: Test automation contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/automation -p 'test_*.py' -v
+
+      - name: Run bounded local coder, CI, and reviewer loop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          python3 scripts/automation/local_worker.py --issue-number "$ISSUE_NUMBER"
