@@ -70,7 +70,6 @@ This is a targeted source audit of the current `main` branch, not an exhaustive 
 3. [App model and activation](03-appmodel-activation.md)
 4. [Graphics and composition](04-graphics-and-composition.md)
 5. [Milestone roadmap](05-milestone-roadmap.md)
-6. [Microsoft UWP / WinRT platform contracts](06-microsoft-platform-contracts.md)
 
 ## Current source-level findings
 

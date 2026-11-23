@@ -45,10 +45,20 @@ def answer(name):
     files = git("grep", "-l", "-F", handler, "--", "native").split()
     if files:
         return files[0], handler
+    
+    # Check for implementations first (both exported and defined)
     exported = git("grep", "-l", "-w", "-E", rf"^\s*{name}(\s|=|@|$)", "--", "native/guest/*.def", "native/guest/*exports.txt").split()
     defined = git("grep", "-l", "-E", rf"^(CRT|EXPORT|__declspec\(dllexport\))[^(]*\b{name}\s*\(", "--", "native/guest").split()
-    if exported or defined:
-        return (exported or defined)[0], name
+    
+    # If there's an implementation, return it
+    if defined:
+        # Return the first implementation file (preferably one with actual code)
+        return defined[0], name
+    
+    # If there's only an export without implementation, don't count it
+    if exported and not defined:
+        return None
+        
     return None
 
 
