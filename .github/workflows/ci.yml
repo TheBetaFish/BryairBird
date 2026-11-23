@@ -87,6 +87,11 @@ jobs:
       - name: Compile Python tools
         run: python3 -m py_compile scripts/*.py .github/scripts/*.py
 
+      - name: Test local automation contracts
+        run: |
+          python3 -m py_compile scripts/automation/*.py
+          python3 -m unittest discover -s scripts/automation -p 'test_*.py' -v
+
       - name: Test the downloads of pinned files
         run: python3 scripts/test_downloads.py
 
