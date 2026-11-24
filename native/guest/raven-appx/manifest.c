@@ -282,7 +282,13 @@ APPX_UNKNOWN(package_dependency, IAppxManifestPackageDependency, dependency, app
 
 static HRESULT dependency_string(IUnknown *iface, const WCHAR *name, LPWSTR *out)
 {
-	return appx_task_string(appx_attribute_value(((dependency *)iface)->node, name), out);
+	if (!out)
+		return E_POINTER;
+	*out = NULL;
+	const WCHAR *text = appx_attribute_value(((dependency *)iface)->node, name);
+	if (!text)
+		return APPX_E_INVALID_MANIFEST;
+	return appx_task_string(text, out);
 }
 
 static HRESULT dependency_version(IUnknown *iface, const WCHAR *name, UINT64 *out)
@@ -291,7 +297,9 @@ static HRESULT dependency_version(IUnknown *iface, const WCHAR *name, UINT64 *ou
 		return E_POINTER;
 	*out = 0;
 	const WCHAR *text = appx_attribute_value(((dependency *)iface)->node, name);
-	return !text || parse_version(text, out) ? S_OK : APPX_E_INVALID_MANIFEST;
+	if (!text)
+		return APPX_E_INVALID_MANIFEST;
+	return parse_version(text, out) ? S_OK : APPX_E_INVALID_MANIFEST;
 }
 
 static HRESULT WINAPI package_dependency_name(IAppxManifestPackageDependency *iface, LPWSTR *name) { return dependency_string((IUnknown *)iface, L"Name", name); }
@@ -320,7 +328,14 @@ static HRESULT WINAPI family_min_version(IAppxManifestTargetDeviceFamily *iface,
 }
 static HRESULT WINAPI family_max_version(IAppxManifestTargetDeviceFamily *iface, UINT64 *version)
 {
-	return dependency_version((IUnknown *)iface, L"MaxVersionTested", version);
+	// MaxVersionTested is optional according to schema, so we allow it to be missing
+	if (!version)
+		return E_POINTER;
+	*version = 0;
+	const WCHAR *text = appx_attribute_value(((dependency *)iface)->node, L"MaxVersionTested");
+	if (!text)
+		return S_OK; // Optional attribute - return success with zero value
+	return parse_version(text, version) ? S_OK : APPX_E_INVALID_MANIFEST;
 }
 
 static const IAppxManifestTargetDeviceFamilyVtbl family_table = {family_query, family_add_ref, family_release, family_name, family_min_version,
